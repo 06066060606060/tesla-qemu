@@ -1,5 +1,5 @@
 # Tesla on QEMU
-sw 2026.8.3 mcu2
+sw 2026.8.3 mcu2 model S
 
 Run Tesla's QtCar infotainment UI from a firmware squashfs image inside QEMU.
 
