@@ -35,7 +35,7 @@ TAP=tap1 HOST_CIDR=192.168.91.5/24 ./create-tap.sh
 ## Build The Disk Image
 
 ```bash
-./build.sh firmware/2026.2.3.model3.squashfs
+./build.sh firmware/2026.8.3.squashfs
 ```
 
 This creates `out/disk.img`, copies the Tesla root filesystem into it, adds Xorg/Mesa support, installs the input proxy helpers, applies the current QtCar/DRM patches, and caches Alpine boot files under `cache/alpine-iso`.
