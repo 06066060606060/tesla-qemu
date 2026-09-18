@@ -187,9 +187,14 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 
-if ! xrandr -s 1920x1200; then
-    echo "Xorg: failed to set 1920x1200"
+# Force the X11 desktop to the same portrait geometry exposed by QEMU.
+# QtCar and the touch proxy both use this coordinate space.
+if ! xrandr -s 1200x1920; then
+    echo "Xorg: failed to set 1200x1920"
     cat /tmp/xrandr.log 2>/dev/null
 fi
+
+# Report the final X11 geometry so the touch proxy uses the expected portrait space.
+xrandr | sed -n '1,12p'
 
 /usr/sbin/sshd -f /etc/ssh/sshd_config_qemu &
