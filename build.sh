@@ -75,7 +75,7 @@ sudo mount ./out/disk.img "$DISK_MOUNT"
 sudo mount -t squashfs "$INPUT_FILE" "$SQUASHFS_MOUNT"
 
 log "Copy files to disk image"
-sudo cp -R "$SQUASHFS_MOUNT"/* "$DISK_MOUNT" || true
+sudo cp -a "$SQUASHFS_MOUNT"/. "$DISK_MOUNT"/
 
 if [ ! -d "$CONTAINER_IMAGE_PATH" ]; then
     log "Build X11 docker image"
@@ -204,55 +204,90 @@ sudo mkdir -p ./mnt/disk/usr/local/lib
 sudo cp out/vblank-fix.so ./mnt/disk/usr/local/lib/vblank-fix.so
 
 log "Patch libQtCarUIFramework.so for touch input in QEMU"
-# Four patches to libQtCarUIFramework.so (Model 3 ICE, firmware 2026.2.3):
+# Four patches to libQtCarUIFramework.so (Model 3 ICE, firmware 2026.8.3):
 #
-# 1. NOP the conditional jump in DisplayDevice constructor that skips
-#    loading the touch driver based on a display-type flag (this->0xd70).
-#    At 0x89cef9: "jne 0x89d8f1" (0f 85 f2 09 00 00) → 6x NOP
+# 1. NOP the conditional jump in DisplayDevice constructor.
+#    At 0x80d1a9:
+#      jne 0x80dc61 (0f 85 b2 0a 00 00)
+#    -> 6x NOP.
 #
-# 2. Fix NULL theTouchDevice crash: the constructor reads theTouchDevice
-#    (a BSS global, zero-initialized) and calls loadTouchDriver on it.
-#    Since getInstance() hasn't been called yet, theTouchDevice is NULL,
-#    causing a segfault at loadTouchDriver+0x17 (deref NULL+0xfa8).
-#    Fix: replace the theTouchDevice load (17 bytes at 0x89cf28) with a
-#    call to TouchDevice::getInstance(DisplayDevice*) via PLT, which
-#    creates and caches a valid TouchDevice object.
-#    New code: mov %r12,%rdi; call getInstance@plt; xchg %rax,%rbx; mov rdi,[rip+off]
-#    getInstance@plt = 0x4e43e0, call offset from 0x89cf30 = 0xffc474b0
-#    HighPrecisionTouch rip-rel from 0x89cf39 = 0x74db87 (target 0xfeaac0)
+# 2. Fix NULL theTouchDevice crash.
+#    At 0x80d1df the original 14 bytes are:
+#      mov rax,[theTouchDevice]
+#      cmpb $0,0x29(%rbp)
+#      mov rbx,(rax)
 #
-# 3. Patch ManagedQtCarTouchDriver::isPowered() to always return true.
-#    At 0xaee050: → mov eax,1; ret (b8 01 00 00 00 c3)
+#    Replace them with:
+#      mov rdi,r12
+#      call TouchDevice::getInstance(DisplayDevice*)@plt
+#      xchg rax,rbx
+#      cmpb $0,0x29(%rbp)
 #
-# 4. Patch ManagedQtCarTouchDriver::isDisplayOn() to always return true.
-#    At 0xaede20: → mov eax,1; ret (b8 01 00 00 00 c3)
+#    This preserves the existing JE at 0x80d1ed.
+#    getInstance@plt = 0x458b20.
+#
+# 3. Force ManagedQtCarTouchDriver::isDisplayOn() to return true.
+#    Function address: 0xa61ae0.
+#
+# 4. Force ManagedQtCarTouchDriver::isPowered() to return true.
+#    Function address: 0xa61d10.
+
 TOUCH_LIB="./mnt/disk/usr/tesla/UI/lib/libQtCarUIFramework.so"
 sudo python3 - "$TOUCH_LIB" <<'PY'
 import sys
 
 path = sys.argv[1]
+
 patches = [
-    (0x89cef9, bytes.fromhex('0f85f2090000'), bytes.fromhex('909090909090'), 'NOP touch-skip jump in DisplayDevice ctor'),
-    (0x89cf28, None, bytes.fromhex('4c89e7e8b074c4ff4893488b3d87db7400'), 'call getInstance before loadTouchDriver'),
-    (0xaee050, None, bytes.fromhex('b801000000c3'), 'ManagedQtCarTouchDriver::isPowered() -> return true'),
-    (0xaede20, None, bytes.fromhex('b801000000c3'), 'ManagedQtCarTouchDriver::isDisplayOn() -> return true'),
+    (
+        0x80d1a9,
+        bytes.fromhex("0f85b20a0000"),
+        bytes.fromhex("909090909090"),
+        "NOP touch-skip jump in DisplayDevice ctor",
+    ),
+    (
+        0x80d1df,
+        bytes.fromhex("488b0512d06b00807d2900488b18"),
+        bytes.fromhex("4c89e7e839b9c4ff4893807d2900"),
+        "call TouchDevice::getInstance before loadTouchDriver",
+    ),
+    (
+        0xa61ae0,
+        bytes.fromhex("534889fbe8c79d9eff"),
+        bytes.fromhex("b801000000c3"),
+        "ManagedQtCarTouchDriver::isDisplayOn() -> return true",
+    ),
+    (
+        0xa61d10,
+       bytes.fromhex("534889fbe827a0a0ff"),
+       bytes.fromhex("b801000000c3"),
+        "ManagedQtCarTouchDriver::isPowered() -> return true",
+    ),
 ]
 
-with open(path, 'r+b') as f:
+with open(path, "r+b") as f:
     for offset, expected, patch, desc in patches:
         f.seek(offset)
-        orig = f.read(len(patch))
-        if orig == patch:
-            print(f'  {offset:#x}: already patched ({desc})')
+        orig = f.read(len(expected))
+
+        # Allow the script to be run again without failing.
+        if orig[:len(patch)] == patch:
+            print(f"  {offset:#x}: already patched ({desc})")
             continue
-        if expected is not None and orig != expected:
+
+        if orig != expected:
             raise SystemExit(
-                f'{path}: unexpected bytes at {offset:#x}: '
-                f'{orig.hex()} != {expected.hex()} ({desc})'
+                f"{path}: unexpected bytes at {offset:#x}: "
+                f"{orig.hex()} != {expected.hex()} ({desc})"
             )
+
         f.seek(offset)
         f.write(patch)
-        print(f'  {offset:#x}: {orig.hex()} -> {patch.hex()}  ({desc})')
+
+        print(
+            f"  {offset:#x}: {orig.hex()} -> "
+            f"{patch.hex()}  ({desc})"
+        )
 PY
 
 log "Patch libdrm.so.2: drmWaitVBlank -> return 0 (VirtIO GPU has no vblank)"
@@ -267,7 +302,7 @@ import sys
 
 path = sys.argv[1]
 patches = [
-    (0x97e4, None, bytes.fromhex('31c0c3'), 'drmWaitVBlank -> xor eax,eax; ret'),
+    (0x97e4, bytes.fromhex('415649'), bytes.fromhex('31c0c3'), 'drmWaitVBlank -> xor eax,eax; ret'),
 ]
 
 with open(path, 'r+b') as f:
@@ -350,6 +385,9 @@ sudo cp ./cache/ssh/ssh_host_ecdsa_key ./mnt/disk/var/etc/ssh/ssh_host_ecdsa_key
 sudo cp ./cache/ssh/ssh_host_ed25519 ./mnt/disk/var/etc/ssh/ssh_host_ed25519
 
 log "Adding our SSH public keys"
+if ! ssh-add -L >/dev/null 2>&1; then
+    err "No SSH authentication agent/key available. Run ssh-agent and ssh-add first."
+fi
 sudo mkdir -p ./mnt/disk/root/.ssh
 ssh-add -L | sudo tee "./mnt/disk/root/.ssh/authorized_keys"
 
