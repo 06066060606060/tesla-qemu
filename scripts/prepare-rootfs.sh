@@ -23,6 +23,9 @@
 #      (they abort the server with a dixGetPrivateAddr assertion).
 #   6. AppArmor: allow the second DRM node (card1 / renderD129) used by
 #      virtio-gpu-pci, and drop the unmodifiable Xorg profile.
+#   8. check-lvm-parts: suppress the reboot it triggers after fixing the
+#      partition table or running e2fsck, which loops forever under QEMU
+#      (SUPPRESS_REBOOT=0 keeps the stock behaviour).
 #   7. Add a "qemu-net" runit service that configures eth0 and starts sshd, so
 #      the VM is reachable without using the serial console, and unlock the
 #      root account.
@@ -45,6 +48,7 @@ GUEST_IP="${GUEST_IP:-192.168.90.100}"
 GUEST_GW="${GUEST_GW:-192.168.90.2}"
 ROOT_PASSWORD="${ROOT_PASSWORD:-root}"
 SKIP_SSH="${SKIP_SSH:-0}"
+SUPPRESS_REBOOT="${SUPPRESS_REBOOT:-1}"
 
 log()  { echo -e "\033[32m$1\033[0m"; }
 warn() { echo -e "\033[33mWARN: $1\033[0m" >&2; }
@@ -87,6 +91,48 @@ if n:
 else:
     print("  no tune2fs -Q call found (nothing to do)")
 PY
+    # 8. The script restarts the machine after "fixing" the partition table or
+    #    running e2fsck. When the condition comes back on every boot - which it
+    #    does under QEMU - that is an endless reboot loop, so turn the restart
+    #    into a message and let the boot continue.
+    if [ "$SUPPRESS_REBOOT" != "0" ]; then
+      # /etc/runit/1 reboots as well when one of its children fails.
+      for target in "$LVM_SCRIPT" "$R/etc/runit/1"; do
+        [ -f "$target" ] || continue
+        log "  suppress reboots in $(realpath --relative-to="$R" "$target")"
+        sudo python3 - "$target" <<'PYREBOOT'
+import re, sys
+
+path = sys.argv[1]
+s = open(path).read()
+changed = 0
+
+# Neutralise the usual ways of restarting from a shell script.
+s, n = re.subn(r'(?m)^(\s*)((?:/s?bin/)?reboot\b[^\n]*)$',
+               r'\1echo "qemu: reboot suppressed (\2)"', s)
+changed += n
+s, n = re.subn(r'(?m)^(\s*)([^\n]*>\s*/proc/sysrq-trigger[^\n]*)$',
+               r'\1echo "qemu: sysrq reboot suppressed"', s)
+changed += n
+s, n = re.subn(r'(?m)^(\s*)((?:/s?bin/)?shutdown\s+-r[^\n]*)$',
+               r'\1echo "qemu: shutdown suppressed (\2)"', s)
+changed += n
+
+if changed:
+    open(path, 'w').write(s)
+    print(f"  suppressed {changed} reboot call(s)")
+else:
+    print("  no direct reboot call found; stage 1 reboots on a non-zero exit, "
+          "so the script now ends with exit 0")
+
+# runit runs stage 3 when /etc/runit/1 fails, so never report a failure.
+MARK = 'qemu: never fail runit stage 1'
+if MARK not in open(path).read():
+    with open(path, 'a') as f:
+        f.write('\nexit 0  # ' + MARK + '\n')
+PYREBOOT
+      done
+    fi
 else
     warn "check-lvm-parts / luks_format_and_open script not found"
 fi

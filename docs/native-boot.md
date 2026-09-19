@@ -92,6 +92,30 @@ available inside the image (`/root/start-qtcar.sh`).
 
 ### Boot loop
 
+`out/serial.log` shows the real cause:
+
+```
+runit/1: REBOOTING - check-lvm-parts: Partition table modification or e2fsck fixes
+- runit: warning: child failed: /etc/runit/1
+- runit: enter stage: /etc/runit/3
+```
+
+This is not a kernel panic: the stock `check-lvm-parts` restarts the machine on
+purpose once it has repaired the partition table or a filesystem, expecting the
+repair to hold. Under QEMU the same condition returns on the next boot, so the
+machine restarts forever.
+
+`prepare-rootfs.sh` now rewrites those `reboot`, `shutdown -r` and
+`/proc/sysrq-trigger` calls into console messages in both `check-lvm-parts` and
+`/etc/runit/1`, and makes the script exit 0 so runit does not jump to stage 3.
+The boot then continues and the console says what it wanted to repair.
+
+```bash
+./scripts/prepare-rootfs.sh firmware/<version>.squashfs
+```
+
+`SUPPRESS_REBOOT=0` keeps the stock behaviour.
+
 The kernel command line used to carry `panic=1`, so any failure rebooted after
 one second and the cause scrolled past. `panic=0` and `-no-reboot` are now the
 default: the VM stops on the error and QEMU exits, leaving the whole story in
