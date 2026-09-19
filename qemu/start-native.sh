@@ -133,7 +133,7 @@ ARGS+=(
 case "$NET" in
     user)
         ARGS+=(
-            -netdev "user,id=net0,net=192.168.90.0/24,host=192.168.90.2,hostfwd=tcp::2222-192.168.90.100:22"
+            -netdev "user,id=net0,net=192.168.90.0/24,host=192.168.90.2,dhcpstart=192.168.90.100,hostfwd=tcp::2222-192.168.90.100:22"
             -device "$NIC,netdev=net0"
         )
         echo "network: user mode ($NIC), ssh -p 2222 root@localhost"

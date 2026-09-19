@@ -90,6 +90,43 @@ sv status /etc/sv/*            # what runit actually started
 If QtCar is not up, the launcher scripts from the Alpine path are still
 available inside the image (`/root/start-qtcar.sh`).
 
+### SSH does not connect
+
+`prepare-rootfs.sh` installs a `qemu-net` runit service that waits for `eth0`,
+assigns `192.168.90.100/24`, generates host keys in `/var/etc/ssh` on first
+boot, and runs sshd with `/etc/ssh/sshd_config_qemu`. It also unlocks the root
+account (`ROOT_PASSWORD`, default `root`) and installs your public key
+(`SSH_PUBKEY`, or the agent keys, or `~/.ssh/*.pub`), because the stock image
+has a locked root password and no `authorized_keys` — password and key logins
+both fail otherwise, usually with nothing more than a closed connection.
+
+A rootfs built before this service existed has to be repacked:
+
+```bash
+./scripts/prepare-rootfs.sh firmware/2026.8.3.squashfs
+```
+
+Then check, on the QEMU serial console or in `out/serial.log`:
+
+```bash
+ip addr show eth0            # must show 192.168.90.100
+sv status /etc/sv/qemu-net   # must be "run"
+cat /etc/sv/qemu-net/supervise/stat 2>/dev/null
+ps | grep sshd
+```
+
+If the service is missing, `prepare-rootfs.sh` found no directory watched by
+`runsvdir` and said so; start it by hand with `runsv /etc/sv/qemu-net &`.
+
+If `eth0` does not exist at all, the guest has no driver for the emulated NIC —
+see the network device model section above and try `NIC=e1000`.
+
+With `NET=user`, connect through the forwarded port, not the guest address:
+
+```bash
+ssh -p 2222 root@localhost
+```
+
 Note that with a non-Tesla kernel, the rootfs only carries
 `/lib/modules/4.14.334-PLK`, so the `modprobe` calls added to `/etc/runit/1`
 fail harmlessly — the drivers already loaded from the initramfs keep working.
