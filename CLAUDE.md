@@ -30,6 +30,16 @@ ssh root@192.168.90.100
 /root/start-qtcar.sh
 ```
 
+```bash
+# Alternative: native boot (stock Tesla kernel + runit + read-only squashfs)
+./scripts/build-initrd-custom.sh
+./scripts/prepare-rootfs.sh firmware/2026.8.3.squashfs
+sudo ./scripts/make-overlay.sh
+./qemu/start-native.sh
+```
+
+See `docs/native-boot.md` for the rationale behind each patch in that path.
+
 ## Architecture
 
 ```
@@ -49,6 +59,10 @@ QEMU (KVM, 512MB RAM, 2 CPUs)
   - `rootfs/root/start.sh` - VM init: network, Xorg, sshd
   - `rootfs/home/tesla/start.sh` - QtCar launcher with env vars
 - `mnt/` - Temporary mount points for build process
+- `scripts/` - Native-boot path: initrd build, rootfs patching, LVM overlay
+  creation/repair, iasImage kernel extraction
+- `tools/custom_init.c` - PID 1 for the native-boot initramfs (mounts the
+  squashfs, switch_root, execve /sbin/init)
 
 ### Build Process (build.sh)
 
