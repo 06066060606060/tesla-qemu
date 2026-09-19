@@ -70,14 +70,26 @@ if [ -n "$MODLOOP" ] && [ -z "$MODULES_DIR" ]; then
         log "Extract $MODLOOP"
         unsquashfs -q -d "$EXTRACT" "$MODLOOP" >/dev/null
     fi
-    # Alpine layout: <root>/modules/<kver>/...
-    MODULES_DIR="$(find "$EXTRACT/modules" -maxdepth 1 -mindepth 1 -type d | head -1)"
-    [ -n "$MODULES_DIR" ] || err "no modules directory inside $MODLOOP"
+    # Alpine layout: <root>/modules/<kver>/... plus a sibling "firmware"
+    # directory, so pick the one that actually holds a kernel tree.
+    MODULES_DIR=""
+    for cand in "$EXTRACT"/modules/*; do
+        [ -d "$cand" ] || continue
+        [ "$(basename "$cand")" = "firmware" ] && continue
+        if [ -d "$cand/kernel" ] || [ -f "$cand/modules.dep" ]; then
+            MODULES_DIR="$cand"
+            break
+        fi
+    done
+    [ -n "$MODULES_DIR" ] || err "no kernel modules directory inside $MODLOOP (looked in $EXTRACT/modules)"
 fi
 
 MODULE_LOAD_LIST=""
 if [ -n "$MODULES_DIR" ]; then
     [ -d "$MODULES_DIR" ] || err "MODULES_DIR '$MODULES_DIR' not found"
+    if [ ! -d "$MODULES_DIR/kernel" ] && [ ! -f "$MODULES_DIR/modules.dep" ]; then
+        err "'$MODULES_DIR' does not look like a kernel modules tree (no kernel/ and no modules.dep)"
+    fi
     KVER="$(basename "$MODULES_DIR")"
     log "Collect kernel modules for $KVER"
 
@@ -135,6 +147,20 @@ if [ -n "$MODULES_DIR" ]; then
         dest="$STAGING/lib/modules/$KVER/$rel"
         mkdir -p "$(dirname "$dest")"
         cp "$ko" "$dest"
+
+        # Alpine and several distributions ship compressed modules. Decompress
+        # them here rather than relying on busybox insmod having seamless
+        # gz/xz/zstd support built in.
+        case "$dest" in
+            *.ko.gz)  gzip -d -f "$dest"  && rel="${rel%.gz}"  && dest="${dest%.gz}"  ;;
+            *.ko.xz)  xz -d -f "$dest"    && rel="${rel%.xz}"   && dest="${dest%.xz}"  ;;
+            *.ko.zst) zstd -q -d --rm "$dest" && rel="${rel%.zst}" && dest="${dest%.zst}" ;;
+        esac
+        if [ ! -f "$dest" ]; then
+            warn "could not decompress $(basename "$ko") (skipped)"
+            continue
+        fi
+
         MODULE_LOAD_LIST="$MODULE_LOAD_LIST /lib/modules/$KVER/$rel"
         COUNT=$((COUNT + 1))
     done
