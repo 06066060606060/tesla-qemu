@@ -90,6 +90,30 @@ sv status /etc/sv/*            # what runit actually started
 If QtCar is not up, the launcher scripts from the Alpine path are still
 available inside the image (`/root/start-qtcar.sh`).
 
+### `check-lvm-parts: e2fsck: Bad magic number in super-block`
+
+The logical volume exists but carries no filesystem the guest can read, so
+`check-lvm-parts` reformats it with `mke2fs`. Boot usually continues after
+that, but the volume is recreated on every boot if the cause persists.
+
+Check the image from the host:
+
+```bash
+sudo ./scripts/verify-overlay.sh out/overlay.qcow2
+```
+
+Two causes have been addressed in `make-overlay.sh`:
+
+- Data left in the page cache never reached the qcow2 file, because the VG was
+  deactivated without a `sync` or a device flush first. The image looked fine on
+  the host and empty to the guest.
+- `metadata_csum_seed` and `orphan_file`, enabled by default since e2fsprogs
+  1.47, are unknown to the stock `4.14.334-PLK` kernel. They are now disabled
+  along with `quota` and `project`.
+
+Rebuild the overlay: `sudo ./scripts/make-overlay.sh`. The script now verifies
+every volume before finishing, so this fails on the host instead of mid-boot.
+
 ### Stuck on `custom_init: waiting for /dev/vda`
 
 The kernel has no virtio-blk driver, so the rootfs disk never shows up. That

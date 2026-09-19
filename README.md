@@ -132,7 +132,7 @@ boots the service tree, QtCar included.
 Helper scripts:
 
 - `scripts/extract_iasImage.py` — pull the bzImage out of `bank_a.iasImage`
-- `scripts/fix-lvm-quota.sh` — offline `e2fsck` + quota cleanup of an overlay
+- `scripts/verify-overlay.sh`, `scripts/fix-lvm-quota.sh` — offline `e2fsck` + quota cleanup of an overlay
 
 Full rationale, log excerpts and limitations: [docs/native-boot.md](./docs/native-boot.md).
 

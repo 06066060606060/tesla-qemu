@@ -67,7 +67,12 @@ esac
 mkdir -p "$(dirname "$OUT")"
 
 cleanup() {
+    # Flush before tearing down: data still in the page cache would never reach
+    # the qcow2 file and the guest would see an invalid superblock.
+    sync
+    udevadm settle 2>/dev/null || true
     vgchange -an "$VG" --config "$FILTER" >/dev/null 2>&1 || true
+    blockdev --flushbufs "$NBD" 2>/dev/null || true
     qemu-nbd --disconnect "$NBD" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -121,7 +126,11 @@ for entry in "${VOLUMES[@]}"; do
     pct="${entry##*:}"
     log "Create LV $name (${pct}%VG) + ext4 without quota"
     lvcreate -y -n "$name" -l "${pct}%VG" "$VG" --config "$FILTER" >/dev/null
-    mkfs.ext4 -q -O ^quota,^project -L "$name" "/dev/$VG/$name"
+    # quota/project: the cause of the check-lvm-parts failure.
+    # metadata_csum_seed and orphan_file are enabled by default from
+    # e2fsprogs 1.47 and are unknown to the stock 4.14-PLK kernel.
+    mkfs.ext4 -q -O ^quota,^project,^metadata_csum_seed,^orphan_file \
+        -L "$name" "/dev/$VG/$name"
     tune2fs -O ^quota,^project "/dev/$VG/$name" >/dev/null
 done
 
@@ -131,6 +140,28 @@ lvs "$VG" --config "$FILTER" || true
 
 cleanup
 trap - EXIT
+
+# --- verification --------------------------------------------------------
+# Re-read the image the way the guest will, so a silent write failure is
+# caught here rather than by check-lvm-parts mid-boot.
+log "Verify the volumes"
+qemu-nbd --connect="$NBD" "$OUT"
+sleep 1
+vgchange -ay "$VG" --config "$FILTER" >/dev/null 2>&1 || true
+udevadm settle 2>/dev/null || true
+VERIFY_FAILED=0
+for entry in "${VOLUMES[@]}"; do
+    name="${entry%%:*}"
+    if dumpe2fs -h "/dev/mapper/${VG}-${name}" >/dev/null 2>&1; then
+        echo "  OK   /dev/mapper/${VG}-${name}"
+    else
+        echo "  FAIL /dev/mapper/${VG}-${name} (invalid superblock)"
+        VERIFY_FAILED=1
+    fi
+done
+vgchange -an "$VG" --config "$FILTER" >/dev/null 2>&1 || true
+qemu-nbd --disconnect "$NBD" >/dev/null 2>&1 || true
+[ "$VERIFY_FAILED" = 0 ] || err "verification failed: the guest would reformat these volumes at boot"
 
 chown "${SUDO_UID:-0}:${SUDO_GID:-0}" "$OUT" 2>/dev/null || true
 log "DONE: $OUT"
