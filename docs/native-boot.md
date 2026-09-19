@@ -81,8 +81,22 @@ from 4G upwards. Override with `PCT_VAR`, `PCT_HOME`, `PCT_LOG`,
 the guest actually writes.
 
 Launch overrides: `RAM`, `SMP`, `RESOLUTION`, `DISPLAY_BACKEND`, `KERNEL`,
-`INITRD`, `SQUASHFS`, `OVERLAY`, `NET` (`user` or `tap`), `GL` (`off`/`on`),
-`KVM`.
+`INITRD`, `SQUASHFS`, `OVERLAY`, `NET` (`user` or `tap`), `NIC`, `GL`
+(`off`/`on`), `KVM`, `QEMU_BIN`.
+
+### Network device model
+
+The real MCU2 has an Intel `igb` NIC and the firmware ships `igb.ko`, so the
+launcher prefers `-device igb`. That model only exists in QEMU 8.2 and later —
+older builds fail with `'igb' is not a valid device model name`. The script
+probes `qemu-system-x86_64 -device help` and falls back to `e1000e`, `e1000`,
+then `virtio-net-pci`, printing which one it picked.
+
+With a generic kernel (`vmlinuz-lts`) any model works. With the stock Tesla
+kernel, a fallback model needs its driver: `e1000e` and `virtio-net` are *not*
+necessarily built in that config, so either upgrade QEMU, or build/copy the
+matching module into `/lib/modules/4.14.334-PLK` before repacking the squashfs.
+Force a specific model with `NIC=e1000`.
 
 SSH: `ssh -p 2222 root@localhost` with `NET=user`, or
 `ssh root@192.168.90.100` with `NET=tap` after `./create-tap.sh`.

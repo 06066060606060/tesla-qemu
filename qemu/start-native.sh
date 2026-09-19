@@ -34,6 +34,7 @@ NET="${NET:-user}"          # user | tap
 TAP="${TAP:-tap0}"
 KVM="${KVM:-1}"
 GL="${GL:-off}"             # off = 2D scanout (recommended), on = virtio-vga-gl
+NIC="${NIC:-auto}"          # auto | igb | e1000e | e1000 | virtio-net-pci
 
 err() { echo -e "\033[31m$1\033[0m" >&2; exit 1; }
 
@@ -51,6 +52,26 @@ if command -v qemu-img >/dev/null; then
         while [ "$NEXT" -lt "$OVERLAY_BYTES" ]; do NEXT=$((NEXT * 2)); done
         err "overlay '$OVERLAY' is $OVERLAY_BYTES bytes; QEMU's sd-card needs a power-of-two size.
 Fix it with:  qemu-img resize $OVERLAY $((NEXT / 1024 / 1024 / 1024))G"
+    fi
+fi
+
+# The real MCU2 uses an Intel igb NIC and the firmware ships igb.ko, so that is
+# the first choice - but QEMU only gained the 'igb' model in 8.2, hence the
+# fallback chain. With a non-Tesla kernel (e.g. vmlinuz-lts) any model works.
+QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+if [ "$NIC" = "auto" ]; then
+    AVAILABLE="$("$QEMU_BIN" -device help 2>/dev/null || true)"
+    NIC=""
+    for candidate in igb e1000e e1000 virtio-net-pci; do
+        if printf '%s' "$AVAILABLE" | grep -q "\"$candidate\""; then
+            NIC="$candidate"
+            break
+        fi
+    done
+    [ -n "$NIC" ] || NIC="virtio-net-pci"
+    if [ "$NIC" != "igb" ]; then
+        echo "note: this QEMU has no 'igb' device model (added in QEMU 8.2), using '$NIC'"
+        echo "      a stock Tesla kernel may not have a driver for it; set NIC=... to override"
     fi
 fi
 
@@ -113,16 +134,16 @@ case "$NET" in
     user)
         ARGS+=(
             -netdev "user,id=net0,net=192.168.90.0/24,host=192.168.90.2,hostfwd=tcp::2222-192.168.90.100:22"
-            -device igb,netdev=net0
+            -device "$NIC,netdev=net0"
         )
-        echo "network: user mode, ssh -p 2222 root@localhost"
+        echo "network: user mode ($NIC), ssh -p 2222 root@localhost"
         ;;
     tap)
         ARGS+=(
             -netdev "tap,id=net0,ifname=$TAP,script=no,downscript=no"
-            -device igb,netdev=net0
+            -device "$NIC,netdev=net0"
         )
-        echo "network: $TAP, ssh root@192.168.90.100"
+        echo "network: $TAP ($NIC), ssh root@192.168.90.100"
         ;;
     *)
         err "NET must be 'user' or 'tap'"
