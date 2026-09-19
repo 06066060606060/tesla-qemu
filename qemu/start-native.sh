@@ -26,6 +26,9 @@ INITRD="${INITRD:-./out/initrd_custom.cpio.gz}"
 SQUASHFS="${SQUASHFS:-./out/rootfs_edited.squashfs}"
 OVERLAY="${OVERLAY:-./out/overlay.qcow2}"
 OVERLAY_IF="${OVERLAY_IF:-sd}"   # sd | virtio
+# Must match GUEST_SSH_PORT in scripts/prepare-rootfs.sh: port 22 belongs to the
+# stock sshd, which only accepts Tesla-signed certificates.
+GUEST_SSH_PORT="${GUEST_SSH_PORT:-2022}"
 # A panic must stop the VM, not restart it: an immediate reboot scrolls the
 # cause off the console and looks like a boot loop. PANIC=1 restores the
 # hardware behaviour (reboot after 1 s).
@@ -164,10 +167,10 @@ ARGS+=(
 case "$NET" in
     user)
         ARGS+=(
-            -netdev "user,id=net0,net=192.168.90.0/24,host=192.168.90.2,dhcpstart=192.168.90.100,hostfwd=tcp::2222-192.168.90.100:22"
+            -netdev "user,id=net0,net=192.168.90.0/24,host=192.168.90.2,dhcpstart=192.168.90.100,hostfwd=tcp::2222-192.168.90.100:$GUEST_SSH_PORT,hostfwd=tcp::2223-192.168.90.100:22"
             -device "$NIC,netdev=net0"
         )
-        echo "network: user mode ($NIC), ssh -p 2222 root@localhost"
+        echo "network: user mode ($NIC), ssh -p 2222 root@localhost (2223 = stock sshd)"
         ;;
     tap)
         ARGS+=(

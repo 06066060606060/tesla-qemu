@@ -287,6 +287,21 @@ If the service is missing, `prepare-rootfs.sh` found no directory watched by
 If `eth0` does not exist at all, the guest has no driver for the emulated NIC —
 see the network device model section above and try `NIC=e1000`.
 
+The stock sshd owns port 22 and only accepts certificates signed by Tesla's PKI:
+
+```
+# REMOTE SSH NOT ALLOWED: customer vehicle
+root@localhost: Permission denied (publickey).
+```
+
+Seeing that banner means you reached the firmware's sshd, not ours. Ours now
+listens on `2022` inside the guest (`GUEST_SSH_PORT`), and the forwards are:
+
+```bash
+ssh -p 2222 root@localhost   # our sshd, password or your key
+ssh -p 2223 root@localhost   # the stock sshd, Tesla certificates only
+```
+
 `kex_exchange_identification: Connection reset by peer` means sshd accepted the
 connection then died. The usual cause was host keys written under `/var`, which
 lives on LVM and is not mounted when the service starts — they now go to
