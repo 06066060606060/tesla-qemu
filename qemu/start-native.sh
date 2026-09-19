@@ -26,6 +26,10 @@ INITRD="${INITRD:-./out/initrd_custom.cpio.gz}"
 SQUASHFS="${SQUASHFS:-./out/rootfs_edited.squashfs}"
 OVERLAY="${OVERLAY:-./out/overlay.qcow2}"
 OVERLAY_IF="${OVERLAY_IF:-virtio}"   # virtio | sd
+# A panic must stop the VM, not restart it: an immediate reboot scrolls the
+# cause off the console and looks like a boot loop. PANIC=1 restores the
+# hardware behaviour (reboot after 1 s).
+PANIC="${PANIC:-0}"
 RESOLUTION="${RESOLUTION:-1200x1920}"
 WIDTH="${RESOLUTION%x*}"
 HEIGHT="${RESOLUTION#*x}"
@@ -98,8 +102,14 @@ fi
 # the dwc3 blacklist avoids a long USB role-switch probe that does not exist
 # in QEMU.
 ARGS+=(
-    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=1 security=apparmor apparmor=1 intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 net.ifnames=0 biosdevname=0 video=${RESOLUTION}"
+    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=${PANIC} security=apparmor apparmor=1 intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 net.ifnames=0 biosdevname=0 video=${RESOLUTION}"
 )
+
+if [ "$PANIC" = "0" ]; then
+    # Without this QEMU restarts on triple fault / reboot() and the boot
+    # appears to loop forever.
+    ARGS+=( -no-reboot )
+fi
 
 # Read-only rootfs (squashfs) on virtio-blk -> /dev/vda, mounted by custom_init.
 ARGS+=( -drive "if=virtio,file=$SQUASHFS,format=raw,readonly=on" )

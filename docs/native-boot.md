@@ -90,6 +90,26 @@ sv status /etc/sv/*            # what runit actually started
 If QtCar is not up, the launcher scripts from the Alpine path are still
 available inside the image (`/root/start-qtcar.sh`).
 
+### Boot loop
+
+The kernel command line used to carry `panic=1`, so any failure rebooted after
+one second and the cause scrolled past. `panic=0` and `-no-reboot` are now the
+default: the VM stops on the error and QEMU exits, leaving the whole story in
+`out/serial.log`. Read the last screen before the stop:
+
+```bash
+tail -100 out/serial.log
+```
+
+`PANIC=1 ./qemu/start-native.sh` restores the hardware behaviour.
+
+A loop that starts right after the overlay was switched to virtio-blk usually
+means the guest now enumerates two virtio disks and `custom_init` mounted the
+wrong one. `/dev/vda` is the first `-drive` on the command line, which is the
+squashfs; if the order is inverted, the mount of `/mnt` fails and PID 1 exits,
+which the kernel treats as a panic. The diagnostics dump lists `/sys/block`, so
+the serial log shows which device holds what.
+
 ### `check-lvm-parts: e2fsck: Bad magic number in super-block`
 
 The logical volume exists but carries no filesystem the guest can read, so
