@@ -105,8 +105,8 @@ static int find_tablet_device(void)
 
 /* --- uinput touchscreen (for QtCar TouchDriver) --- */
 
-#define TOUCH_X_MAX 1199
-#define TOUCH_Y_MAX 1919
+#define TOUCH_X_MAX 1200
+#define TOUCH_Y_MAX 1920
 
 static int create_uinput_device(void)
 {
@@ -159,6 +159,23 @@ static void emit(int fd, unsigned short type, unsigned short code, int value)
     ev.code = code;
     ev.value = value;
     write(fd, &ev, sizeof(ev));
+}
+
+static void debug_touch_position(
+    const char *type,
+    int screen_x,
+    int screen_y,
+    int touch_x,
+    int touch_y)
+{
+    fprintf(stderr,
+            "[TOUCH DEBUG] %-8s X11=(%4d,%4d) Touch=(%4d,%4d)\n",
+            type,
+            screen_x,
+            screen_y,
+            touch_x,
+            touch_y);
+    fflush(stderr);
 }
 
 int main(void)
@@ -226,12 +243,10 @@ int main(void)
 
         case EV_KEY:
             if (ev.code == BTN_LEFT) {
-                /* Log first few events */
-                if (event_count < 5) {
-                    fprintf(stderr, "x11-input-proxy: BTN_LEFT %s at (%d,%d)\n",
-                            ev.value ? "press" : "release", cur_x, cur_y);
-                    event_count++;
-                }
+                /* Log touch coordinates for diagnosis */
+                fprintf(stderr, "x11-input-proxy: BTN_LEFT %s at (%d,%d)\n",
+                        ev.value ? "press" : "release", cur_x, cur_y);
+                fflush(stderr);
 
                 /* Inject X11 mouse button event */
                 XTestFakeMotionEvent(dpy, DefaultScreen(dpy), cur_x, cur_y, 0);
@@ -242,6 +257,15 @@ int main(void)
                 if (ui_fd >= 0) {
                     int tx = cur_x * TOUCH_X_MAX / screen_w;
                     int ty = cur_y * TOUCH_Y_MAX / screen_h;
+
+                    debug_touch_position(
+                        ev.value ? "DOWN" : "UP",
+                        cur_x,
+                        cur_y,
+                        tx,
+                        ty
+                    );
+
                     if (ev.value && !touch_active) {
                         touch_active = 1;
                         emit(ui_fd, EV_ABS, ABS_MT_SLOT, 0);
@@ -269,6 +293,15 @@ int main(void)
                 if (ui_fd >= 0 && touch_active) {
                     int tx = cur_x * TOUCH_X_MAX / screen_w;
                     int ty = cur_y * TOUCH_Y_MAX / screen_h;
+
+                    debug_touch_position(
+                        "MOVE",
+                        cur_x,
+                        cur_y,
+                        tx,
+                        ty
+                    );
+
                     emit(ui_fd, EV_ABS, ABS_MT_POSITION_X, tx);
                     emit(ui_fd, EV_ABS, ABS_MT_POSITION_Y, ty);
                     emit(ui_fd, EV_SYN, SYN_REPORT, 0);
