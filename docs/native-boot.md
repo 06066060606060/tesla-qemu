@@ -116,6 +116,19 @@ Two causes have been addressed in `make-overlay.sh`:
 Rebuild the overlay: `sudo ./scripts/make-overlay.sh`. The script now verifies
 every volume before finishing, so this fails on the host instead of mid-boot.
 
+If `verify-overlay.sh` reports every volume as OK and the guest still
+reformats them at each boot, the writes are not reaching the image: QEMU's SD
+card emulation is the fragile part of this setup. Use virtio-blk instead, which
+is now the default:
+
+```bash
+OVERLAY_IF=virtio ./qemu/start-native.sh   # /dev/vdb, default
+OVERLAY_IF=sd     ./qemu/start-native.sh   # /dev/mmcblk0, like the real MCU2
+```
+
+LVM locates its PV by scanning the block devices, so the volumes are found
+either way, and the power-of-two size constraint only applies to `sd`.
+
 ### Stuck on `custom_init: waiting for /dev/vda`
 
 The kernel has no virtio-blk driver, so the rootfs disk never shows up. That

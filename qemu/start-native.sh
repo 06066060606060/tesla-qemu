@@ -25,6 +25,7 @@ KERNEL="${KERNEL:-./out/bzImage}"
 INITRD="${INITRD:-./out/initrd_custom.cpio.gz}"
 SQUASHFS="${SQUASHFS:-./out/rootfs_edited.squashfs}"
 OVERLAY="${OVERLAY:-./out/overlay.qcow2}"
+OVERLAY_IF="${OVERLAY_IF:-virtio}"   # virtio | sd
 RESOLUTION="${RESOLUTION:-1200x1920}"
 WIDTH="${RESOLUTION%x*}"
 HEIGHT="${RESOLUTION#*x}"
@@ -44,6 +45,7 @@ err() { echo -e "\033[31m$1\033[0m" >&2; exit 1; }
 [ -f "$OVERLAY" ]  || err "overlay '$OVERLAY' not found - run sudo ./scripts/make-overlay.sh"
 
 # QEMU's sd-card device rejects any capacity that is not a power of two.
+if [ "$OVERLAY_IF" = "sd" ]; then
 if command -v qemu-img >/dev/null; then
     OVERLAY_BYTES="$(qemu-img info --output=json "$OVERLAY" 2>/dev/null |
         sed -n 's/.*"virtual-size": *\([0-9]*\).*/\1/p' | head -1)"
@@ -53,6 +55,7 @@ if command -v qemu-img >/dev/null; then
         err "overlay '$OVERLAY' is $OVERLAY_BYTES bytes; QEMU's sd-card needs a power-of-two size.
 Fix it with:  qemu-img resize $OVERLAY $((NEXT / 1024 / 1024 / 1024))G"
     fi
+fi
 fi
 
 # The real MCU2 uses an Intel igb NIC and the firmware ships igb.ko, so that is
@@ -101,12 +104,29 @@ ARGS+=(
 # Read-only rootfs (squashfs) on virtio-blk -> /dev/vda, mounted by custom_init.
 ARGS+=( -drive "if=virtio,file=$SQUASHFS,format=raw,readonly=on" )
 
-# Writable overlay as an SD/eMMC device -> /dev/mmcblk0 (LVM: var/home/log).
-ARGS+=(
-    -device sdhci-pci
-    -device sd-card,drive=mmc0
-    -drive "if=none,id=mmc0,format=qcow2,file=$OVERLAY"
-)
+# Writable overlay carrying the LVM volumes (var/home/log/gamesusr).
+# OVERLAY_IF=sd reproduces the real hardware (/dev/mmcblk0), but QEMU's SD
+# emulation is fragile: power-of-two capacity only, and writes are unreliable
+# on some versions, which shows up as check-lvm-parts reformatting ivg-var at
+# every boot. LVM finds its PV by scanning, so virtio-blk (/dev/vdb) works just
+# as well and is the default.
+case "$OVERLAY_IF" in
+    virtio)
+        ARGS+=( -drive "if=virtio,file=$OVERLAY,format=qcow2" )
+        echo "overlay: virtio-blk (/dev/vdb)"
+        ;;
+    sd)
+        ARGS+=(
+            -device sdhci-pci
+            -device sd-card,drive=mmc0
+            -drive "if=none,id=mmc0,format=qcow2,file=$OVERLAY"
+        )
+        echo "overlay: SD/eMMC (/dev/mmcblk0)"
+        ;;
+    *)
+        err "OVERLAY_IF must be 'virtio' or 'sd' (got '$OVERLAY_IF')"
+        ;;
+esac
 
 # Display. 2D scanout by default: virgl segfaulted in the host GL driver and
 # triggered RCU stalls in the guest.
