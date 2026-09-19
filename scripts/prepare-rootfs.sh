@@ -235,8 +235,12 @@ if [ "$SKIP_SSH" != "1" ]; then
 
     if [ -n "$SSHD_BIN" ]; then
         SSHD_CMD="exec $SSHD_BIN -D -e -f /etc/ssh/sshd_config_qemu"
+        # Fail loudly: a silent sshd death reaches the client only as
+        # "kex_exchange_identification: Connection reset by peer".
+        SSHD_TEST="$SSHD_BIN -t -f /etc/ssh/sshd_config_qemu || echo \"qemu-net: sshd config test FAILED\""
     else
         SSHD_CMD="exec sleep infinity"
+        SSHD_TEST=":"
     fi
 
     sudo mkdir -p "$R/etc/sv/qemu-net"
@@ -277,12 +281,14 @@ ip addr add $GUEST_IP/24 dev "\$IFACE" 2>/dev/null
 ip link set "\$IFACE" up
 ip route add default via $GUEST_GW 2>/dev/null
 
-mkdir -p /var/etc/ssh /run/sshd
+mkdir -p /run/qemu-ssh /run/sshd
 chmod 0755 /run/sshd
 for _t in rsa ecdsa ed25519; do
-    _k=/var/etc/ssh/ssh_host_\${_t}_key
+    _k=/run/qemu-ssh/ssh_host_\${_t}_key
     [ -f "\$_k" ] || ssh-keygen -q -t "\$_t" -N "" -f "\$_k"
 done
+
+$SSHD_TEST
 
 $SSHD_CMD
 EOF
@@ -300,9 +306,9 @@ UsePAM no
 UseDNS no
 StrictModes no
 AuthorizedKeysFile /root/.ssh/authorized_keys
-HostKey /var/etc/ssh/ssh_host_rsa_key
-HostKey /var/etc/ssh/ssh_host_ecdsa_key
-HostKey /var/etc/ssh/ssh_host_ed25519_key
+HostKey /run/qemu-ssh/ssh_host_rsa_key
+HostKey /run/qemu-ssh/ssh_host_ecdsa_key
+HostKey /run/qemu-ssh/ssh_host_ed25519_key
 PidFile /run/sshd/sshd.pid
 Subsystem sftp internal-sftp
 SSHDCONF

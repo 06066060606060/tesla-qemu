@@ -37,6 +37,20 @@ VG="${VG:-ivg}"
 # read-only from virtio-blk, not from p2/p3. Set LEGACY_PARTS=1 to recreate
 # them at full size (costs 3.8 GiB) for a layout closer to the real eMMC.
 LEGACY_PARTS="${LEGACY_PARTS:-0}"
+
+# The firmware owns its volume scheme: check-lvm-parts shrinks the PV to a fixed
+# size, expects volume names of its own (gamesvar, not gamesusr) and creates
+# what is missing. Pre-created volumes only get in its way - it cannot shrink a
+# PV whose extents are allocated:
+#   /dev/mmcblk0p4: cannot resize to 1502 extents as 1839 are allocated.
+#   Volume group "ivg" has insufficient free space (175 extents): 2048 required.
+# So ship an empty VG by default and let the guest populate it.
+CREATE_LVS="${CREATE_LVS:-0}"
+
+# Size check-lvm-parts resizes the PV to, taken from its own log line:
+#   WARNING: /dev/mmcblk0p4: Pretending size is 12312576 not 16508895 sectors.
+# Matching it from the start avoids the failing pvresize. 0 = rest of the disk.
+P4_SECTORS="${P4_SECTORS:-12312576}"
 # Volume sizes as a percentage of the volume group, so the same script works
 # from a 4G image up to 64G. Override individually if needed.
 PCT_VAR="${PCT_VAR:-30}"
@@ -124,7 +138,11 @@ else
         -n 3:0:+1M -c 3:rootfs-b-legacy -t 3:8300
     )
 fi
-SGDISK_ARGS+=( -n 4:0:0 -c 4:lvm -t 4:8E00 )
+if [ "$P4_SECTORS" = "0" ]; then
+    SGDISK_ARGS+=( -n 4:0:0 -c 4:lvm -t 4:8E00 )
+else
+    SGDISK_ARGS+=( -n "4:0:+${P4_SECTORS}" -c 4:lvm -t 4:8E00 )
+fi
 sgdisk "${SGDISK_ARGS[@]}" "$NBD" >/dev/null
 partprobe "$NBD" 2>/dev/null || true
 sleep 1
@@ -136,7 +154,7 @@ log "Create PV/VG $VG on ${NBD}p4"
 pvcreate -ff -y "${NBD}p4" --config "$FILTER" >/dev/null
 vgcreate "$VG" "${NBD}p4" --config "$FILTER" >/dev/null
 
-# name:percent-of-VG - the remainder stays free for growth or snapshots.
+# name:percent-of-VG - only used when CREATE_LVS=1.
 VOLUMES=(
     "var:$PCT_VAR"
     "home:$PCT_HOME"
@@ -144,14 +162,19 @@ VOLUMES=(
     "gamesusr:$PCT_GAMESUSR"
 )
 
-for entry in "${VOLUMES[@]}"; do
-    name="${entry%%:*}"
-    pct="${entry##*:}"
-    log "Create LV $name (${pct}%VG) + ext4 without quota"
-    lvcreate -y -n "$name" -l "${pct}%VG" "$VG" --config "$FILTER" >/dev/null
-    mkfs.ext4 -q -O "$EXT4_DISABLE" -L "$name" "/dev/$VG/$name"
-    tune2fs -O ^quota,^project "/dev/$VG/$name" >/dev/null
-done
+if [ "$CREATE_LVS" = "1" ]; then
+    for entry in "${VOLUMES[@]}"; do
+        name="${entry%%:*}"
+        pct="${entry##*:}"
+        log "Create LV $name (${pct}%VG) + ext4 without quota"
+        lvcreate -y -n "$name" -l "${pct}%VG" "$VG" --config "$FILTER" >/dev/null
+        mkfs.ext4 -q -O "$EXT4_DISABLE" -L "$name" "/dev/$VG/$name"
+        tune2fs -O ^quota,^project "/dev/$VG/$name" >/dev/null
+    done
+else
+    log "Leave the VG empty: check-lvm-parts creates its own volumes"
+    VOLUMES=()
+fi
 
 log "Result"
 vgs "$VG" --config "$FILTER" || true
@@ -163,13 +186,17 @@ trap - EXIT
 # --- verification --------------------------------------------------------
 # Re-read the image the way the guest will, so a silent write failure is
 # caught here rather than by check-lvm-parts mid-boot.
-log "Verify the volumes"
+log "Verify the result"
 qemu-nbd --connect="$NBD" "$OUT"
 sleep 1
 vgchange -ay "$VG" --config "$FILTER" >/dev/null 2>&1 || true
 udevadm settle 2>/dev/null || true
 VERIFY_FAILED=0
-for entry in "${VOLUMES[@]}"; do
+if [ "${#VOLUMES[@]}" -eq 0 ]; then
+    FREE="$(vgs --noheadings -o vg_free_count "$VG" --config "$FILTER" 2>/dev/null | tr -d ' ')"
+    echo "  VG $VG created, $FREE free extent(s) for the guest"
+fi
+for entry in "${VOLUMES[@]+"${VOLUMES[@]}"}"; do
     name="${entry%%:*}"
     if dumpe2fs -h "/dev/mapper/${VG}-${name}" >/dev/null 2>&1; then
         echo "  OK   /dev/mapper/${VG}-${name}"

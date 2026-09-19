@@ -148,6 +148,37 @@ squashfs; if the order is inverted, the mount of `/mnt` fails and PID 1 exits,
 which the kernel treats as a panic. The diagnostics dump lists `/sys/block`, so
 the serial log shows which device holds what.
 
+### check-lvm-parts fights the pre-created volumes
+
+With the reboot suppressed, the console finally shows what it wants:
+
+```
+LVM PV requires shrinking
+WARNING: /dev/mmcblk0p4: Pretending size is 12312576 not 16508895 sectors.
+/dev/mmcblk0p4: cannot resize to 1502 extents as 1839 are allocated.
+Volume group "ivg" has insufficient free space (175 extents): 2048 required.
+Failed to find logical volume "ivg/gamesvar"
+gaming Logical Volume mismatch; updating Volume Group as needed
+no pre-existing scheme found, creating from scratch
+```
+
+The firmware owns its volume scheme. It shrinks the PV to a fixed size, uses its
+own names (`gamesvar`, not the `gamesusr` guessed here) and creates whatever is
+missing — but it cannot shrink a PV whose extents are already allocated, so
+pre-created volumes block it.
+
+`make-overlay.sh` therefore ships an **empty** VG, and sizes p4 to the
+12312576 sectors the firmware resizes to, which avoids the failing `pvresize`:
+
+```bash
+sudo ./scripts/make-overlay.sh            # empty VG (default)
+CREATE_LVS=1 sudo ./scripts/make-overlay.sh   # old behaviour
+P4_SECTORS=0 sudo ./scripts/make-overlay.sh   # p4 spans the rest of the disk
+```
+
+The first boot after this is slow: the guest creates and formats every volume
+itself.
+
 ### `check-lvm-parts: e2fsck: Bad magic number in super-block`
 
 The logical volume exists but carries no filesystem the guest can read, so
@@ -227,9 +258,9 @@ Check inside the guest with `ls /sys/class/net` and `ip link`.
 
 ### SSH does not connect
 
-`prepare-rootfs.sh` installs a `qemu-net` runit service that waits for `eth0`,
-assigns `192.168.90.100/24`, generates host keys in `/var/etc/ssh` on first
-boot, and runs sshd with `/etc/ssh/sshd_config_qemu`. It also unlocks the root
+`prepare-rootfs.sh` installs a `qemu-net` runit service that waits for the
+interface, assigns `192.168.90.100/24`, generates host keys in `/run/qemu-ssh`
+on first boot, and runs sshd with `/etc/ssh/sshd_config_qemu`. It also unlocks the root
 account (`ROOT_PASSWORD`, default `root`) and installs your public key
 (`SSH_PUBKEY`, or the agent keys, or `~/.ssh/*.pub`), because the stock image
 has a locked root password and no `authorized_keys` — password and key logins
@@ -255,6 +286,12 @@ If the service is missing, `prepare-rootfs.sh` found no directory watched by
 
 If `eth0` does not exist at all, the guest has no driver for the emulated NIC —
 see the network device model section above and try `NIC=e1000`.
+
+`kex_exchange_identification: Connection reset by peer` means sshd accepted the
+connection then died. The usual cause was host keys written under `/var`, which
+lives on LVM and is not mounted when the service starts — they now go to
+`/run/qemu-ssh` on tmpfs. The service also runs `sshd -t` first, so a bad
+configuration is reported on the console instead of silently resetting clients.
 
 With `NET=user`, connect through the forwarded port, not the guest address:
 
