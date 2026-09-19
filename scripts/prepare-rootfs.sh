@@ -49,6 +49,7 @@ GUEST_GW="${GUEST_GW:-192.168.90.2}"
 ROOT_PASSWORD="${ROOT_PASSWORD:-root}"
 SKIP_SSH="${SKIP_SSH:-0}"
 SUPPRESS_REBOOT="${SUPPRESS_REBOOT:-1}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 log()  { echo -e "\033[32m$1\033[0m"; }
 warn() { echo -e "\033[33mWARN: $1\033[0m" >&2; }
@@ -91,50 +92,39 @@ if n:
 else:
     print("  no tune2fs -Q call found (nothing to do)")
 PY
-    # 8. The script restarts the machine after "fixing" the partition table or
-    #    running e2fsck. When the condition comes back on every boot - which it
-    #    does under QEMU - that is an endless reboot loop, so turn the restart
-    #    into a message and let the boot continue.
-    if [ "$SUPPRESS_REBOOT" != "0" ]; then
-      # /etc/runit/1 reboots as well when one of its children fails.
-      for target in "$LVM_SCRIPT" "$R/etc/runit/1"; do
-        [ -f "$target" ] || continue
-        log "  suppress reboots in $(realpath --relative-to="$R" "$target")"
-        sudo python3 - "$target" <<'PYREBOOT'
-import re, sys
-
-path = sys.argv[1]
-s = open(path).read()
-changed = 0
-
-# Neutralise the usual ways of restarting from a shell script.
-s, n = re.subn(r'(?m)^(\s*)((?:/s?bin/)?reboot\b[^\n]*)$',
-               r'\1echo "qemu: reboot suppressed (\2)"', s)
-changed += n
-s, n = re.subn(r'(?m)^(\s*)([^\n]*>\s*/proc/sysrq-trigger[^\n]*)$',
-               r'\1echo "qemu: sysrq reboot suppressed"', s)
-changed += n
-s, n = re.subn(r'(?m)^(\s*)((?:/s?bin/)?shutdown\s+-r[^\n]*)$',
-               r'\1echo "qemu: shutdown suppressed (\2)"', s)
-changed += n
-
-if changed:
-    open(path, 'w').write(s)
-    print(f"  suppressed {changed} reboot call(s)")
-else:
-    print("  no direct reboot call found; stage 1 reboots on a non-zero exit, "
-          "so the script now ends with exit 0")
-
-# runit runs stage 3 when /etc/runit/1 fails, so never report a failure.
-MARK = 'qemu: never fail runit stage 1'
-if MARK not in open(path).read():
-    with open(path, 'a') as f:
-        f.write('\nexit 0  # ' + MARK + '\n')
-PYREBOOT
-      done
-    fi
 else
     warn "check-lvm-parts / luks_format_and_open script not found"
+fi
+
+# --- 8: boot-loop reboots -----------------------------------------------
+# 8. Find whatever prints "REBOOTING" and neutralise the restart. The
+#    message is emitted by a helper run from stage 1, not by /etc/runit/1
+#    itself, so search the image instead of guessing the path.
+if [ "$SUPPRESS_REBOOT" != "0" ]; then
+    log "Suppress the boot-loop reboots"
+    REBOOT_FILES="$(sudo grep -rIl 'REBOOTING' \
+        "$R/etc" "$R/usr/bin" "$R/usr/sbin" "$R/sbin" "$R/usr/share" \
+        2>/dev/null || true)"
+    # Always include the LVM script and stage 1 themselves.
+    for extra in "$LVM_SCRIPT" "$R/etc/runit/1"; do
+        [ -f "$extra" ] || continue
+        case "$REBOOT_FILES" in
+            *"$extra"*) ;;
+            *) REBOOT_FILES="$REBOOT_FILES
+$extra" ;;
+        esac
+    done
+    if [ -n "$(printf '%s' "$REBOOT_FILES" | tr -d '[:space:]')" ]; then
+        printf '%s\n' "$REBOOT_FILES" | while read -r f; do
+            [ -n "$f" ] || continue
+            sudo cp -n "$f" "$f.orig" 2>/dev/null || true
+            echo "  candidate: $(realpath --relative-to="$R" "$f")"
+        done
+        # shellcheck disable=SC2086
+        sudo python3 "$SCRIPT_DIR/lib/suppress-reboot.py" $REBOOT_FILES
+    else
+        warn "nothing printing REBOOTING found; the boot loop may come from elsewhere"
+    fi
 fi
 
 # --- 3: fstab quota options ---------------------------------------------

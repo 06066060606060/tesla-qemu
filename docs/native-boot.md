@@ -105,9 +105,16 @@ purpose once it has repaired the partition table or a filesystem, expecting the
 repair to hold. Under QEMU the same condition returns on the next boot, so the
 machine restarts forever.
 
-`prepare-rootfs.sh` now rewrites those `reboot`, `shutdown -r` and
-`/proc/sysrq-trigger` calls into console messages in both `check-lvm-parts` and
-`/etc/runit/1`, and makes the script exit 0 so runit does not jump to stage 3.
+The `runit/1:` prefix is only the stage-1 log prefix, so the message does not
+come from `/etc/runit/1` — `grep REBOOTING` finds nothing there. It is printed
+by a helper that stage 1 runs, which then exits non-zero; runit treats a failed
+stage-1 child as fatal and enters stage 3 (shutdown).
+
+`prepare-rootfs.sh` therefore searches the whole image for whatever prints
+`REBOOTING` and hands it to `scripts/lib/suppress-reboot.py`, which rewrites the
+non-zero exit that follows the message, plus any `reboot`, `shutdown -r`,
+`/proc/sysrq-trigger` or `reboot_required=1`, into console messages, and appends
+`exit 0` so stage 1 reports success. Backups are kept as `<file>.orig`.
 The boot then continues and the console says what it wanted to repair.
 
 ```bash
