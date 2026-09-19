@@ -25,7 +25,7 @@ KERNEL="${KERNEL:-./out/bzImage}"
 INITRD="${INITRD:-./out/initrd_custom.cpio.gz}"
 SQUASHFS="${SQUASHFS:-./out/rootfs_edited.squashfs}"
 OVERLAY="${OVERLAY:-./out/overlay.qcow2}"
-OVERLAY_IF="${OVERLAY_IF:-virtio}"   # virtio | sd
+OVERLAY_IF="${OVERLAY_IF:-sd}"   # sd | virtio
 # A panic must stop the VM, not restart it: an immediate reboot scrolls the
 # cause off the console and looks like a boot loop. PANIC=1 restores the
 # hardware behaviour (reboot after 1 s).
@@ -115,11 +115,12 @@ fi
 ARGS+=( -drive "if=virtio,file=$SQUASHFS,format=raw,readonly=on" )
 
 # Writable overlay carrying the LVM volumes (var/home/log/gamesusr).
-# OVERLAY_IF=sd reproduces the real hardware (/dev/mmcblk0), but QEMU's SD
-# emulation is fragile: power-of-two capacity only, and writes are unreliable
-# on some versions, which shows up as check-lvm-parts reformatting ivg-var at
-# every boot. LVM finds its PV by scanning, so virtio-blk (/dev/vdb) works just
-# as well and is the default.
+# The default is 'sd' (/dev/mmcblk0) because the firmware refers to that device
+# by name - with virtio the boot partition mount fails with
+# "mount: /mnt/mmcblk0p1: unknown filesystem type" and check-lvm-parts gives up.
+# OVERLAY_IF=virtio (/dev/vdb) avoids QEMU's SD emulation, whose capacity must
+# be a power of two, and is useful to rule it out - LVM finds its PV either way,
+# but only the LVM volumes will work.
 case "$OVERLAY_IF" in
     virtio)
         ARGS+=( -drive "if=virtio,file=$OVERLAY,format=qcow2" )

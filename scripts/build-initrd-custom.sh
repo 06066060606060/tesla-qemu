@@ -27,7 +27,7 @@ MODLOOP="${MODLOOP:-}"
 MODULES_DIR="${MODULES_DIR:-}"
 # Everything custom_init needs before the rootfs exists, plus the storage and
 # display drivers the guest uses right after switch_root.
-KMODS="${KMODS:-squashfs virtio_pci virtio_blk virtio_net net_failover failover virtio_gpu e1000 e1000e igb sdhci_pci sdhci_acpi mmc_block ext4 dm_mod loop usbhid hid_generic xhci_pci evdev uinput}"
+KMODS="${KMODS:-squashfs virtio_pci virtio_blk virtio_net net_failover failover virtio_gpu e1000 e1000e igb sdhci_pci sdhci_acpi mmc_block ext4 dm_mod loop usbhid hid_generic xhci_pci evdev uinput ext2 mbcache}"
 
 log()  { echo -e "\033[32m$1\033[0m"; }
 warn() { echo -e "\033[33mWARN: $1\033[0m" >&2; }

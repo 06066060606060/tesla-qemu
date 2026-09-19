@@ -160,18 +160,22 @@ Two causes have been addressed in `make-overlay.sh`:
 Rebuild the overlay: `sudo ./scripts/make-overlay.sh`. The script now verifies
 every volume before finishing, so this fails on the host instead of mid-boot.
 
-If `verify-overlay.sh` reports every volume as OK and the guest still
-reformats them at each boot, the writes are not reaching the image: QEMU's SD
-card emulation is the fragile part of this setup. Use virtio-blk instead, which
-is now the default:
+The overlay is exposed as an SD/eMMC card by default:
 
 ```bash
-OVERLAY_IF=virtio ./qemu/start-native.sh   # /dev/vdb, default
-OVERLAY_IF=sd     ./qemu/start-native.sh   # /dev/mmcblk0, like the real MCU2
+OVERLAY_IF=sd     ./qemu/start-native.sh   # /dev/mmcblk0, like the MCU2 (default)
+OVERLAY_IF=virtio ./qemu/start-native.sh   # /dev/vdb, bypasses SD emulation
 ```
 
-LVM locates its PV by scanning the block devices, so the volumes are found
-either way, and the power-of-two size constraint only applies to `sd`.
+`virtio` is useful to rule out QEMU's SD emulation, but it is not a working
+setup: the firmware refers to the device by name, so the boot partition mount
+fails with `mount: /mnt/mmcblk0p1: unknown filesystem type` and check-lvm-parts
+gives up. Only the LVM volumes are found, because LVM scans every block device.
+
+That `unknown filesystem type 'ext2'` also needs the `ext2` module in the
+initrd: `ext4` does not register the `ext2` name unless the kernel was built
+with `CONFIG_EXT4_USE_FOR_EXT23`, which the Alpine kernel is not. It is now in
+the default `KMODS` list.
 
 ### Stuck on `custom_init: waiting for /dev/vda`
 
