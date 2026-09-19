@@ -106,7 +106,7 @@ If everything works, the QtCar UI should appear:
 If you already have a firmware squashfs, this path needs no 6 GB disk copy:
 
 ```bash
-MODLOOP=./cache/alpine-iso/boot/modloop-lts \\\n  ./scripts/build-initrd-custom.sh                      # initrd + custom_init
+./scripts/build-initrd-custom.sh                        # initrd + custom_init
 ./scripts/prepare-rootfs.sh firmware/2026.8.3.squashfs  # patch + repack rootfs
 sudo ./scripts/make-overlay.sh                          # writable LVM overlay
 ./qemu/start-native.sh
@@ -117,6 +117,17 @@ fixes needed for the full service tree to come up in a VM: no more `wipefs -a`
 reformatting the LVM volumes on every boot, no ext4 quota features on a kernel
 without `CONFIG_QUOTA`, a 60 s RCU stall timeout, stock evdev input
 autodetection in Xorg, and AppArmor access to the second DRM node.
+
+With a distribution kernel (Alpine's `vmlinuz-lts`), squashfs and virtio are
+modules, so they have to be embedded in the initramfs:
+
+```bash
+MODLOOP=./cache/alpine-iso/boot/modloop-lts ./scripts/build-initrd-custom.sh
+KERNEL=./cache/alpine-iso/boot/vmlinuz-lts ./qemu/start-native.sh
+```
+
+Unlike the Alpine path, nothing has to be started by hand afterwards: runit
+boots the service tree, QtCar included.
 
 Helper scripts:
 
