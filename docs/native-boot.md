@@ -105,6 +105,25 @@ of loaded modules. After a 30 s timeout `custom_init` dumps `/sys/block`,
 `/dev`, `/proc/partitions`, `/proc/modules` and `/proc/filesystems`, then drops
 to a busybox rescue shell so the VM can be inspected instead of hanging.
 
+### `eth0: ERROR while getting interface flags: No such device`
+
+The guest has no network interface at all, for one of two reasons.
+
+The kernel has no driver for the emulated NIC. The initrd now ships `e1000`,
+`e1000e`, `igb`, `virtio_net` (plus `failover`/`net_failover`), so rebuild it:
+
+```bash
+MODLOOP=./cache/alpine-iso/boot/modloop-lts ./scripts/build-initrd-custom.sh
+```
+
+Or the interface exists under a predictable name such as `enp0s2` instead of
+`eth0`. The kernel command line now sets `net.ifnames=0 biosdevname=0`, and the
+`qemu-net` service picks the first non-loopback interface in `/sys/class/net`
+rather than assuming `eth0`. If it finds none it says so on the console and
+lists the loaded modules.
+
+Check inside the guest with `ls /sys/class/net` and `ip link`.
+
 ### SSH does not connect
 
 `prepare-rootfs.sh` installs a `qemu-net` runit service that waits for `eth0`,

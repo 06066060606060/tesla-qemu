@@ -210,15 +210,35 @@ if [ "$SKIP_SSH" != "1" ]; then
 exec 2>&1
 set -x
 
-# The NIC can appear slightly after runit starts.
+ip link set lo up
+
+# The NIC appears slightly after runit starts, and depending on the kernel it
+# may be eth0 or a predictable name such as enp0s2: take the first interface
+# that is not loopback.
+IFACE=""
 for _i in \$(seq 1 30); do
-    ip link show eth0 >/dev/null 2>&1 && break
+    for _c in /sys/class/net/*; do
+        # An unmatched glob stays literal, so check the entry exists.
+        [ -e "\$_c" ] || continue
+        _n=\$(basename "\$_c")
+        [ "\$_n" = "lo" ] && continue
+        IFACE="\$_n"
+        break
+    done
+    [ -n "\$IFACE" ] && break
     sleep 1
 done
 
-ip link set lo up
-ip addr add $GUEST_IP/24 dev eth0 2>/dev/null
-ip link set eth0 up
+if [ -z "\$IFACE" ]; then
+    echo "qemu-net: no network interface found. The kernel has no driver for"
+    echo "qemu-net: the emulated NIC. Interfaces: \$(ls /sys/class/net)"
+    echo "qemu-net: loaded modules: \$(cut -d' ' -f1 /proc/modules | tr '\\n' ' ')"
+    exec sleep infinity
+fi
+
+echo "qemu-net: using interface \$IFACE"
+ip addr add $GUEST_IP/24 dev "\$IFACE" 2>/dev/null
+ip link set "\$IFACE" up
 ip route add default via $GUEST_GW 2>/dev/null
 
 mkdir -p /var/etc/ssh /run/sshd

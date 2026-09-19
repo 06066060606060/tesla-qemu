@@ -95,7 +95,7 @@ fi
 # the dwc3 blacklist avoids a long USB role-switch probe that does not exist
 # in QEMU.
 ARGS+=(
-    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=1 security=apparmor apparmor=1 intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 video=${RESOLUTION}"
+    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=1 security=apparmor apparmor=1 intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 net.ifnames=0 biosdevname=0 video=${RESOLUTION}"
 )
 
 # Read-only rootfs (squashfs) on virtio-blk -> /dev/vda, mounted by custom_init.
