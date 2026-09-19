@@ -87,8 +87,26 @@ ssh -p 2222 root@localhost     # NET=user
 sv status /etc/sv/*            # what runit actually started
 ```
 
-If QtCar is not up, the launcher scripts from the Alpine path are still
-available inside the image (`/root/start-qtcar.sh`).
+### Launch helpers
+
+`rootfs/root/start.sh` and `start-qtcar.sh` belong to the Alpine path, which
+copies them into the guest. The native path patches the stock squashfs instead,
+so `prepare-rootfs.sh` installs them under `/root`, plus a generated
+`/root/start-native.sh`: the same script with the parts runit already handles
+removed — network, virtual filesystems, the Alpine modloop mount and the sshd
+launch.
+
+Over SSH, as root:
+
+```bash
+/root/start-native.sh      # input devices, Xorg, 1200x1920, touch proxy
+/root/start-qtcar.sh       # the UI, as the tesla user
+```
+
+Note that `/root` is on the read-only squashfs, so anything these scripts try to
+rewrite in place fails harmlessly — the Xorg input configuration in particular is
+already patched by `prepare-rootfs.sh`, so the `sed -i` inside `start.sh` has
+nothing left to do.
 
 ### Boot loop
 
