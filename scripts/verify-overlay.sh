@@ -12,7 +12,13 @@ set -euo pipefail
 OUT="${1:-out/overlay.qcow2}"
 NBD="${NBD:-/dev/nbd0}"
 VG="${VG:-ivg}"
-FILTER='devices { filter = [ "a|'"$NBD"'p4|", "r|.*|" ] global_filter = [ "a|'"$NBD"'p4|", "r|.*|" ] use_lvmetad = 0 }'
+# use_lvmetad was removed in LVM 2.03; only pass it to versions that know it,
+# otherwise every command prints "Configuration setting unknown".
+LVMETAD=""
+if lvm version 2>/dev/null | grep -qE 'LVM version: *2\.0[12]'; then
+    LVMETAD=" use_lvmetad = 0"
+fi
+FILTER='devices { filter = [ "a|'"$NBD"'p4|", "r|.*|" ] global_filter = [ "a|'"$NBD"'p4|", "r|.*|" ]'"$LVMETAD"' }'
 
 log()  { echo -e "\033[32m$1\033[0m"; }
 err()  { echo -e "\033[31m$1\033[0m" >&2; exit 1; }
