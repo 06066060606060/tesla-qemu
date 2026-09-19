@@ -285,7 +285,7 @@ ip addr add $GUEST_IP/24 dev "\$IFACE" 2>/dev/null
 ip link set "\$IFACE" up
 ip route add default via $GUEST_GW 2>/dev/null
 
-mkdir -p /run/qemu-ssh /run/sshd
+mkdir -p /run/qemu-net/supervise /run/qemu-ssh /run/sshd
 chmod 0755 /run/sshd
 for _t in rsa ecdsa ed25519; do
     _k=/run/qemu-ssh/ssh_host_\${_t}_key
@@ -318,25 +318,59 @@ Subsystem sftp internal-sftp
 SSHDCONF
     sudo sed -i "s/__SSH_PORT__/$GUEST_SSH_PORT/" "$R/etc/ssh/sshd_config_qemu"
 
-    # Enable the service in whichever directory runsvdir watches.
-    SVDIR=""
+    # Enable the service. A symlink in the service directory is not enough on
+    # its own: on this image the directory lives under /var, which is an LVM
+    # volume mounted over the squashfs during boot, so the link disappears
+    # exactly when it would be needed. Launch it from stage 1 as well, which
+    # always runs and is never masked.
     for cand in /etc/service /var/service /etc/runit/runsvdir/current /service; do
-        if [ -d "$R$cand" ]; then SVDIR="$cand"; break; fi
+        if [ -d "$R$cand" ]; then
+            log "  symlink into $cand"
+            sudo ln -sfn /etc/sv/qemu-net "$R$cand/qemu-net"
+            # runsv needs a writable supervise directory; the rootfs is not.
+            sudo ln -sfn /run/qemu-net/supervise "$R/etc/sv/qemu-net/supervise"
+        fi
     done
-    if [ -n "$SVDIR" ]; then
-        log "  enable via $SVDIR"
-        sudo ln -sfn /etc/sv/qemu-net "$R$SVDIR/qemu-net"
-    elif [ -f "$R/etc/runit/1" ]; then
-        if ! sudo grep -q 'qemu-net' "$R/etc/runit/1"; then
-            log "  no runsvdir directory: launch it from /etc/runit/1"
+
+    if [ -f "$R/etc/runit/1" ]; then
+        if sudo grep -q 'qemu-net' "$R/etc/runit/1"; then
+            log "  already launched from /etc/runit/1"
+        else
+            log "  launch from /etc/runit/1"
             sudo tee -a "$R/etc/runit/1" >/dev/null <<'RUNIT1'
 
-# qemu: network + sshd
-runsv /etc/sv/qemu-net &
+# qemu: network + sshd. Run the script directly instead of through runsv: the
+# rootfs is a read-only squashfs, so runsv cannot create its "supervise"
+# directory in /etc/sv/qemu-net. The service directory is also under /var, which
+# is mounted over during boot, so a symlink there would vanish.
+mkdir -p /run/qemu-net
+# Send the output to the serial console when possible, so start-native.sh's
+# out/serial.log shows why sshd or the network failed.
+if [ -w /dev/ttyS0 ]; then
+    qemu_net_out=/dev/ttyS0
+else
+    qemu_net_out=/run/qemu-net/log
+fi
+(/etc/sv/qemu-net/run > "$qemu_net_out" 2>&1 &) &
 RUNIT1
         fi
     else
-        warn "could not enable the service; start it by hand: runsv /etc/sv/qemu-net &"
+        warn "no /etc/runit/1; start the service by hand: runsv /etc/sv/qemu-net &"
+    fi
+
+    # sshd refuses to start without its privilege-separation user and directory,
+    # and dies before the banner - which the client only sees as a reset
+    # connection.
+    if [ -n "$SSHD_BIN" ]; then
+        if ! sudo grep -q '^sshd:' "$R/etc/passwd" 2>/dev/null; then
+            log "  add the sshd privilege-separation user"
+            echo 'sshd:x:74:74:sshd:/run/sshd:/sbin/nologin' |
+                sudo tee -a "$R/etc/passwd" >/dev/null
+            sudo grep -q '^sshd:' "$R/etc/group" 2>/dev/null ||
+                echo 'sshd:x:74:' | sudo tee -a "$R/etc/group" >/dev/null
+        fi
+        sudo mkdir -p "$R/var/empty"
+        sudo chmod 0755 "$R/var/empty"
     fi
 
     # Public key for root.

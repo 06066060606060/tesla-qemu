@@ -302,6 +302,22 @@ ssh -p 2222 root@localhost   # our sshd, password or your key
 ssh -p 2223 root@localhost   # the stock sshd, Tesla certificates only
 ```
 
+A reset on port 2222 while port 2223 still shows the Tesla banner means our
+service never came up. Three reasons were found and fixed:
+
+- The service directory is under `/var`, an LVM volume mounted over the squashfs
+  during boot, so a symlink placed there vanishes at the worst moment. The
+  service is now launched from `/etc/runit/1`, which always runs.
+- `runsv` needs to create a `supervise` directory inside `/etc/sv/qemu-net`, and
+  the rootfs is a read-only squashfs. Stage 1 runs the script directly, and the
+  `supervise` path is a symlink into `/run` for `runsvdir` setups.
+- `sshd` exits before printing its banner when its privilege-separation user or
+  `/var/empty` is missing, which the client sees only as a reset. Both are now
+  created.
+
+Its output goes to `/dev/ttyS0`, so `out/serial.log` contains the `qemu-net:`
+lines, or `/run/qemu-net/log` inside the guest as a fallback.
+
 `kex_exchange_identification: Connection reset by peer` means sshd accepted the
 connection then died. The usual cause was host keys written under `/var`, which
 lives on LVM and is not mounted when the service starts — they now go to
