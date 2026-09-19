@@ -8,13 +8,17 @@ loops. This rewrites the restart into a console message and makes the script
 report success, because runit jumps to stage 3 (shutdown) when a stage-1 child
 fails.
 
+Only the exit that follows the REBOOTING message is rewritten. Appending a
+blanket "exit 0" is not safe: several of these helpers are sourced by
+/etc/runit/1, so the exit would end stage 1 immediately and silently skip the
+whole boot.
+
 Usage: suppress-reboot.py <script> [<script> ...]
 """
 import re
 import sys
 
 MARK = "qemu: reboot suppressed"
-EXIT_MARK = "qemu: never fail runit stage 1"
 
 # Order matters: the combined "echo ...; exit 1" form must be handled before
 # the bare exit.
@@ -55,9 +59,6 @@ def patch(path):
     for pattern, replacement in PATTERNS:
         text, n = pattern.subn(replacement, text)
         total += n
-
-    if EXIT_MARK not in text:
-        text = text.rstrip("\n") + "\nexit 0  # " + EXIT_MARK + "\n"
 
     if text == original:
         print(f"  nothing to change: {path}")

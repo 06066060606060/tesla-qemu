@@ -113,8 +113,15 @@ stage-1 child as fatal and enters stage 3 (shutdown).
 `prepare-rootfs.sh` therefore searches the whole image for whatever prints
 `REBOOTING` and hands it to `scripts/lib/suppress-reboot.py`, which rewrites the
 non-zero exit that follows the message, plus any `reboot`, `shutdown -r`,
-`/proc/sysrq-trigger` or `reboot_required=1`, into console messages, and appends
-`exit 0` so stage 1 reports success. Backups are kept as `<file>.orig`.
+`/proc/sysrq-trigger` or `reboot_required=1`, into console messages. Backups are
+kept as `<file>.orig`.
+
+Only the exit following the message is touched. An earlier version appended a
+blanket `exit 0`, which broke the boot in a much more confusing way: these
+helpers are sourced by `/etc/runit/1`, so the added exit ended stage 1
+immediately. The symptom was `enter stage: /etc/runit/1` followed straight away
+by `leave stage: /etc/runit/1` with no output in between, and stage 2 starting
+with no service ever configured.
 The boot then continues and the console says what it wanted to repair.
 
 ```bash
