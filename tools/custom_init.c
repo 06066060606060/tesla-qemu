@@ -22,6 +22,7 @@
  */
 
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +74,9 @@ int main(void)
 {
 	int consfd;
 
-	if (mount(NULL, "/dev", "devtmpfs", 0, NULL) < 0)
+	/* EBUSY means a wrapper script (see build-initrd-custom.sh) already
+	 * mounted it in order to load kernel modules first. */
+	if (mount(NULL, "/dev", "devtmpfs", 0, NULL) < 0 && errno != EBUSY)
 		die("mount /dev");
 
 	setsid();
@@ -95,8 +98,12 @@ int main(void)
 		die("wait_for_device " ROOT_DEVICE);
 
 	log_msg("mounting rootfs (read-only " ROOT_FSTYPE ")");
-	if (mount(ROOT_DEVICE, "/mnt", ROOT_FSTYPE, MS_RDONLY, NULL) < 0)
+	if (mount(ROOT_DEVICE, "/mnt", ROOT_FSTYPE, MS_RDONLY, NULL) < 0) {
+		if (errno == ENODEV)
+			log_msg("the kernel has no " ROOT_FSTYPE " support: "
+				"build the initrd with KVER/MODLOOP set");
 		die("mount " ROOT_DEVICE);
+	}
 
 	/* The real init remounts these itself inside the new root. */
 	umount2("/sys", MNT_DETACH);

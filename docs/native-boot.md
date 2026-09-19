@@ -52,12 +52,47 @@ rebuild and `modules_install` into the unpacked rootfs before repacking.
 
 ## Quick start
 
+With the stock Tesla kernel (squashfs and virtio are built in):
+
 ```bash
 ./scripts/build-initrd-custom.sh
 ./scripts/prepare-rootfs.sh firmware/2026.8.3.squashfs
 sudo ./scripts/make-overlay.sh
 ./qemu/start-native.sh
 ```
+
+With a distribution kernel such as Alpine's `vmlinuz-lts`, squashfs and virtio
+are **modules**, so they must be embedded in the initramfs — otherwise
+`custom_init` stops on `mount /dev/vda: No such device`:
+
+```bash
+MODLOOP=./cache/alpine-iso/boot/modloop-lts ./scripts/build-initrd-custom.sh
+KERNEL=./cache/alpine-iso/boot/vmlinuz-lts ./qemu/start-native.sh
+```
+
+`MODULES_DIR=/lib/modules/<version>` works too for a modules tree you already
+have on disk. The script resolves `squashfs`, virtio, sdhci/mmc, ext4, dm-mod
+and the input drivers with their dependencies, copies only those, and generates
+an `/init` wrapper that `insmod`s them in order before handing over to
+`custom_init`. Override the list with `KMODS="..."`.
+
+## Then what?
+
+Nothing to launch by hand: unlike the Alpine path, `custom_init` execs
+`/sbin/init`, so runit brings up `/etc/runit/1` then `runsvdir` and the whole
+`/etc/sv/*` tree, QtCar included. Watch it happen in `out/serial.log`, then:
+
+```bash
+ssh -p 2222 root@localhost     # NET=user
+sv status /etc/sv/*            # what runit actually started
+```
+
+If QtCar is not up, the launcher scripts from the Alpine path are still
+available inside the image (`/root/start-qtcar.sh`).
+
+Note that with a non-Tesla kernel, the rootfs only carries
+`/lib/modules/4.14.334-PLK`, so the `modprobe` calls added to `/etc/runit/1`
+fail harmlessly — the drivers already loaded from the initramfs keep working.
 
 ### Sizing the overlay
 

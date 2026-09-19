@@ -106,7 +106,7 @@ If everything works, the QtCar UI should appear:
 If you already have a firmware squashfs, this path needs no 6 GB disk copy:
 
 ```bash
-./scripts/build-initrd-custom.sh                        # initrd + custom_init
+MODLOOP=./cache/alpine-iso/boot/modloop-lts \\\n  ./scripts/build-initrd-custom.sh                      # initrd + custom_init
 ./scripts/prepare-rootfs.sh firmware/2026.8.3.squashfs  # patch + repack rootfs
 sudo ./scripts/make-overlay.sh                          # writable LVM overlay
 ./qemu/start-native.sh
