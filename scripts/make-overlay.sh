@@ -23,7 +23,9 @@
 set -euo pipefail
 
 OUT="${1:-out/overlay.qcow2}"
-SIZE="${SIZE:-24G}"
+# QEMU's sd-card device only accepts capacities that are a power of two,
+# so keep this at 8G / 16G / 32G / 64G.
+SIZE="${SIZE:-32G}"
 NBD="${NBD:-/dev/nbd0}"
 VG="${VG:-ivg}"
 FILTER='devices { filter = [ "a|'"$NBD"'p4|", "r|.*|" ] }'
@@ -36,6 +38,13 @@ for t in qemu-img qemu-nbd sgdisk pvcreate vgcreate lvcreate mkfs.ext4; do
     command -v "$t" >/dev/null || err "$t is required"
 done
 [ -e "$OUT" ] && err "$OUT already exists - remove it first"
+
+# Validate the power-of-two requirement early instead of failing at boot with
+# "Invalid SD card size".
+case "$SIZE" in
+    4G|8G|16G|32G|64G|128G) ;;
+    *) err "SIZE must be a power of two (4G, 8G, 16G, 32G, 64G, 128G) because QEMU's sd-card device requires it" ;;
+esac
 
 mkdir -p "$(dirname "$OUT")"
 
@@ -76,7 +85,7 @@ VOLUMES=(
     "var:4G"
     "home:4G"
     "log:2G"
-    "gamesusr:4G"
+    "gamesusr:8G"
 )
 
 for entry in "${VOLUMES[@]}"; do

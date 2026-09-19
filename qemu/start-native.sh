@@ -42,6 +42,18 @@ err() { echo -e "\033[31m$1\033[0m" >&2; exit 1; }
 [ -f "$SQUASHFS" ] || err "rootfs '$SQUASHFS' not found - run ./scripts/prepare-rootfs.sh <firmware.squashfs>"
 [ -f "$OVERLAY" ]  || err "overlay '$OVERLAY' not found - run sudo ./scripts/make-overlay.sh"
 
+# QEMU's sd-card device rejects any capacity that is not a power of two.
+if command -v qemu-img >/dev/null; then
+    OVERLAY_BYTES="$(qemu-img info --output=json "$OVERLAY" 2>/dev/null |
+        sed -n 's/.*"virtual-size": *\([0-9]*\).*/\1/p' | head -1)"
+    if [ -n "$OVERLAY_BYTES" ] && [ $((OVERLAY_BYTES & (OVERLAY_BYTES - 1))) -ne 0 ]; then
+        NEXT=1
+        while [ "$NEXT" -lt "$OVERLAY_BYTES" ]; do NEXT=$((NEXT * 2)); done
+        err "overlay '$OVERLAY' is $OVERLAY_BYTES bytes; QEMU's sd-card needs a power-of-two size.
+Fix it with:  qemu-img resize $OVERLAY $((NEXT / 1024 / 1024 / 1024))G"
+    fi
+fi
+
 mkdir -p "$(dirname "$SERIAL_LOG")"
 
 ARGS=(
