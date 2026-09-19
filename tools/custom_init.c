@@ -22,6 +22,7 @@
  */
 
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -39,12 +40,73 @@
 #define ROOT_FSTYPE "squashfs"
 #endif
 
+static void log_msg(const char *msg);
+
+static void dump_file(const char *path, const char *label)
+{
+	char buf[1024];
+	int fd, n;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return;
+	printf("--- %s (%s)\n", label, path);
+	while ((n = read(fd, buf, sizeof(buf))) > 0)
+		fwrite(buf, 1, n, stdout);
+	close(fd);
+	fflush(stdout);
+}
+
+static void dump_dir(const char *path, const char *label)
+{
+	struct dirent *e;
+	DIR *d;
+
+	d = opendir(path);
+	if (!d)
+		return;
+	printf("--- %s (%s):", label, path);
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.')
+			continue;
+		printf(" %s", e->d_name);
+	}
+	printf("\n");
+	closedir(d);
+	fflush(stdout);
+}
+
+/* Print enough context to identify the problem, then hand over a shell so the
+ * VM can be inspected instead of hanging on a single error line. */
+static void diagnostics(void)
+{
+	dump_dir("/sys/block", "block devices");
+	dump_dir("/dev", "/dev entries");
+	dump_file("/proc/partitions", "partitions");
+	dump_file("/proc/modules", "loaded modules");
+	dump_file("/proc/filesystems", "known filesystems");
+}
+
+static void rescue_shell(void)
+{
+	char *const argv[] = { "/bin/sh", "-i", NULL };
+	char *const envp[] = { "PATH=/bin:/sbin", "TERM=linux", NULL };
+
+	log_msg("dropping to a rescue shell (busybox); "
+		"exit or reboot when done");
+	execve("/bin/sh", argv, envp);
+	execve("/bin/busybox", (char *const[]){ "busybox", "sh", NULL }, envp);
+
+	log_msg("no shell available in the initramfs");
+	for (;;)
+		sleep(3600);
+}
+
 static void die(const char *what)
 {
 	perror(what);
-	/* Keep the console alive so the error stays readable. */
-	for (;;)
-		sleep(3600);
+	diagnostics();
+	rescue_shell();
 }
 
 static void log_msg(const char *msg)
@@ -65,6 +127,10 @@ static int wait_for_device(const char *path, int timeout_s)
 	for (i = 0; i < timeout_s * 10; i++) {
 		if (stat(path, &st) == 0)
 			return 0;
+		/* Report progress so a stuck boot is obvious on the console. */
+		if (i && i % 50 == 0)
+			printf("custom_init: still waiting for %s (%ds)\n",
+			       path, i / 10);
 		usleep(100000);
 	}
 	return -1;
@@ -94,8 +160,12 @@ int main(void)
 	mount(NULL, "/sys", "sysfs", 0, NULL);
 
 	log_msg("waiting for " ROOT_DEVICE);
-	if (wait_for_device(ROOT_DEVICE, 30) < 0)
+	if (wait_for_device(ROOT_DEVICE, 30) < 0) {
+		log_msg(ROOT_DEVICE " never appeared: the kernel has no virtio-blk "
+			"driver. Rebuild the initrd with MODLOOP=... or "
+			"MODULES_DIR=... (see docs/native-boot.md)");
 		die("wait_for_device " ROOT_DEVICE);
+	}
 
 	log_msg("mounting rootfs (read-only " ROOT_FSTYPE ")");
 	if (mount(ROOT_DEVICE, "/mnt", ROOT_FSTYPE, MS_RDONLY, NULL) < 0) {

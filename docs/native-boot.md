@@ -90,6 +90,21 @@ sv status /etc/sv/*            # what runit actually started
 If QtCar is not up, the launcher scripts from the Alpine path are still
 available inside the image (`/root/start-qtcar.sh`).
 
+### Stuck on `custom_init: waiting for /dev/vda`
+
+The kernel has no virtio-blk driver, so the rootfs disk never shows up. That
+happens when the initrd was built without modules while using a modular kernel:
+
+```bash
+MODLOOP=./cache/alpine-iso/boot/modloop-lts ./scripts/build-initrd-custom.sh
+```
+
+The build now warns explicitly if `squashfs` or `virtio_blk` did not make it
+into the image, and `/init` reports every `insmod` failure plus the final list
+of loaded modules. After a 30 s timeout `custom_init` dumps `/sys/block`,
+`/dev`, `/proc/partitions`, `/proc/modules` and `/proc/filesystems`, then drops
+to a busybox rescue shell so the VM can be inspected instead of hanging.
+
 ### SSH does not connect
 
 `prepare-rootfs.sh` installs a `qemu-net` runit service that waits for `eth0`,
