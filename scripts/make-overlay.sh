@@ -64,6 +64,29 @@ case "$SIZE" in
     *) err "SIZE must be a power of two (4G, 8G, 16G, 32G, 64G, 128G) because QEMU's sd-card device requires it" ;;
 esac
 
+# Features to disable:
+#   quota/project             cause of the check-lvm-parts failure at boot
+#   metadata_csum_seed        unknown to the stock 4.14-PLK kernel
+#   orphan_file               enabled by default from e2fsprogs 1.47, ditto
+# An older mkfs.ext4 rejects the whole -O list when one name is unknown
+# ("Invalid filesystem option set"), so only keep the names it recognises.
+probe_ext4_features() {
+    local probe result="" f
+    probe="$(mktemp)"
+    truncate -s 16M "$probe"
+    for f in "$@"; do
+        if mkfs.ext4 -q -n -O "^$f" "$probe" >/dev/null 2>&1; then
+            result="${result:+$result,}^$f"
+        fi
+    done
+    rm -f "$probe"
+    printf '%s' "$result"
+}
+
+EXT4_DISABLE="$(probe_ext4_features quota project metadata_csum_seed orphan_file)"
+[ -n "$EXT4_DISABLE" ] || err "mkfs.ext4 rejects even -O ^quota; check your e2fsprogs"
+log "ext4 features disabled: $EXT4_DISABLE"
+
 mkdir -p "$(dirname "$OUT")"
 
 cleanup() {
@@ -126,11 +149,7 @@ for entry in "${VOLUMES[@]}"; do
     pct="${entry##*:}"
     log "Create LV $name (${pct}%VG) + ext4 without quota"
     lvcreate -y -n "$name" -l "${pct}%VG" "$VG" --config "$FILTER" >/dev/null
-    # quota/project: the cause of the check-lvm-parts failure.
-    # metadata_csum_seed and orphan_file are enabled by default from
-    # e2fsprogs 1.47 and are unknown to the stock 4.14-PLK kernel.
-    mkfs.ext4 -q -O ^quota,^project,^metadata_csum_seed,^orphan_file \
-        -L "$name" "/dev/$VG/$name"
+    mkfs.ext4 -q -O "$EXT4_DISABLE" -L "$name" "/dev/$VG/$name"
     tune2fs -O ^quota,^project "/dev/$VG/$name" >/dev/null
 done
 

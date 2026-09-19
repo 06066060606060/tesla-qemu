@@ -109,7 +109,9 @@ Two causes have been addressed in `make-overlay.sh`:
   the host and empty to the guest.
 - `metadata_csum_seed` and `orphan_file`, enabled by default since e2fsprogs
   1.47, are unknown to the stock `4.14.334-PLK` kernel. They are now disabled
-  along with `quota` and `project`.
+  along with `quota` and `project`. The list is probed at runtime, because an
+  older `mkfs.ext4` rejects the whole `-O` set with "Invalid filesystem option
+  set" as soon as one name is unknown to it.
 
 Rebuild the overlay: `sudo ./scripts/make-overlay.sh`. The script now verifies
 every volume before finishing, so this fails on the host instead of mid-boot.
