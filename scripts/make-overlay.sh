@@ -18,16 +18,31 @@
 #
 # Usage: sudo ./scripts/make-overlay.sh [out/overlay.qcow2]
 #
+#   SIZE=4G  sudo ./scripts/make-overlay.sh     # smallest usable image
+#   SIZE=16G LEGACY_PARTS=1 sudo ./scripts/make-overlay.sh
+#
+# SIZE must be a power of two: QEMU's sd-card device refuses anything else.
+#
 # Reference: ROOT Tesla OS on QEMU Part 2 - Debugging + fixing
 # https://cn0xroot.wordpress.com/2026/09/20/root_tesla_os_on_qemu_part_2_debugging_fixing/
 set -euo pipefail
 
 OUT="${1:-out/overlay.qcow2}"
 # QEMU's sd-card device only accepts capacities that are a power of two,
-# so keep this at 8G / 16G / 32G / 64G.
-SIZE="${SIZE:-32G}"
+# so keep this at 4G / 8G / 16G / 32G / 64G.
+SIZE="${SIZE:-8G}"
 NBD="${NBD:-/dev/nbd0}"
 VG="${VG:-ivg}"
+# The rootfs-a/b-legacy partitions are dead weight here: the rootfs is served
+# read-only from virtio-blk, not from p2/p3. Set LEGACY_PARTS=1 to recreate
+# them at full size (costs 3.8 GiB) for a layout closer to the real eMMC.
+LEGACY_PARTS="${LEGACY_PARTS:-0}"
+# Volume sizes as a percentage of the volume group, so the same script works
+# from a 4G image up to 64G. Override individually if needed.
+PCT_VAR="${PCT_VAR:-30}"
+PCT_HOME="${PCT_HOME:-25}"
+PCT_LOG="${PCT_LOG:-10}"
+PCT_GAMESUSR="${PCT_GAMESUSR:-25}"
 FILTER='devices { filter = [ "a|'"$NBD"'p4|", "r|.*|" ] }'
 
 log() { echo -e "\033[32m$1\033[0m"; }
@@ -41,6 +56,9 @@ done
 
 # Validate the power-of-two requirement early instead of failing at boot with
 # "Invalid SD card size".
+TOTAL_PCT=$((PCT_VAR + PCT_HOME + PCT_LOG + PCT_GAMESUSR))
+[ "$TOTAL_PCT" -le 100 ] || err "volume percentages add up to ${TOTAL_PCT}% (max 100)"
+
 case "$SIZE" in
     4G|8G|16G|32G|64G|128G) ;;
     *) err "SIZE must be a power of two (4G, 8G, 16G, 32G, 64G, 128G) because QEMU's sd-card device requires it" ;;
@@ -62,14 +80,24 @@ log "Connect $NBD"
 qemu-nbd --connect="$NBD" "$OUT"
 sleep 1
 
-log "Write GPT layout"
+log "Write GPT layout (full-size legacy rootfs partitions: $([ "$LEGACY_PARTS" = 1 ] && echo yes || echo no))"
 sgdisk --zap-all "$NBD" >/dev/null
-sgdisk \
-    -n 1:0:+128M   -c 1:boot            -t 1:8300 \
-    -n 2:0:+1900M  -c 2:rootfs-a-legacy -t 2:8300 \
-    -n 3:0:+1900M  -c 3:rootfs-b-legacy -t 3:8300 \
-    -n 4:0:0       -c 4:lvm             -t 4:8E00 \
-    "$NBD" >/dev/null
+SGDISK_ARGS=( -n 1:0:+128M -c 1:boot -t 1:8300 )
+if [ "$LEGACY_PARTS" = "1" ]; then
+    SGDISK_ARGS+=(
+        -n 2:0:+1900M -c 2:rootfs-a-legacy -t 2:8300
+        -n 3:0:+1900M -c 3:rootfs-b-legacy -t 3:8300
+    )
+else
+    # Keep the numbering intact - p4 must remain the LVM PV - but reduce the
+    # unused legacy slots to stubs.
+    SGDISK_ARGS+=(
+        -n 2:0:+1M -c 2:rootfs-a-legacy -t 2:8300
+        -n 3:0:+1M -c 3:rootfs-b-legacy -t 3:8300
+    )
+fi
+SGDISK_ARGS+=( -n 4:0:0 -c 4:lvm -t 4:8E00 )
+sgdisk "${SGDISK_ARGS[@]}" "$NBD" >/dev/null
 partprobe "$NBD" 2>/dev/null || true
 sleep 1
 
@@ -80,24 +108,25 @@ log "Create PV/VG $VG on ${NBD}p4"
 pvcreate -ff -y "${NBD}p4" --config "$FILTER" >/dev/null
 vgcreate "$VG" "${NBD}p4" --config "$FILTER" >/dev/null
 
-# name:size - adjust freely, the VG has room left for more.
+# name:percent-of-VG - the remainder stays free for growth or snapshots.
 VOLUMES=(
-    "var:4G"
-    "home:4G"
-    "log:2G"
-    "gamesusr:8G"
+    "var:$PCT_VAR"
+    "home:$PCT_HOME"
+    "log:$PCT_LOG"
+    "gamesusr:$PCT_GAMESUSR"
 )
 
 for entry in "${VOLUMES[@]}"; do
     name="${entry%%:*}"
-    size="${entry##*:}"
-    log "Create LV $name ($size) + ext4 without quota"
-    lvcreate -y -n "$name" -L "$size" "$VG" --config "$FILTER" >/dev/null
+    pct="${entry##*:}"
+    log "Create LV $name (${pct}%VG) + ext4 without quota"
+    lvcreate -y -n "$name" -l "${pct}%VG" "$VG" --config "$FILTER" >/dev/null
     mkfs.ext4 -q -O ^quota,^project -L "$name" "/dev/$VG/$name"
     tune2fs -O ^quota,^project "/dev/$VG/$name" >/dev/null
 done
 
 log "Result"
+vgs "$VG" --config "$FILTER" || true
 lvs "$VG" --config "$FILTER" || true
 
 cleanup

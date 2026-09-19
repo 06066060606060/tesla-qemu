@@ -59,6 +59,27 @@ sudo ./scripts/make-overlay.sh
 ./qemu/start-native.sh
 ```
 
+### Sizing the overlay
+
+`make-overlay.sh` defaults to an 8 GiB sparse qcow2, which is enough for the
+runit services and QtCar state. The size **must be a power of two** — QEMU's
+`sd-card` device rejects anything else with `Invalid SD card size`.
+
+```bash
+SIZE=4G  sudo ./scripts/make-overlay.sh          # smallest usable image
+SIZE=16G LEGACY_PARTS=1 sudo ./scripts/make-overlay.sh
+```
+
+The `rootfs-a/b-legacy` partitions are created as 1 MiB stubs by default: the
+rootfs is served read-only from virtio-blk, so p2/p3 are never read and their
+full 1.9 GiB each would be wasted. `LEGACY_PARTS=1` restores them.
+
+Logical volumes are allocated as a share of the volume group (`var` 30%,
+`home` 25%, `log` 10%, `gamesusr` 25%, 10% left free), so the same script works
+from 4G upwards. Override with `PCT_VAR`, `PCT_HOME`, `PCT_LOG`,
+`PCT_GAMESUSR`. Since the image is sparse, a larger `SIZE` costs no disk until
+the guest actually writes.
+
 Launch overrides: `RAM`, `SMP`, `RESOLUTION`, `DISPLAY_BACKEND`, `KERNEL`,
 `INITRD`, `SQUASHFS`, `OVERLAY`, `NET` (`user` or `tap`), `GL` (`off`/`on`),
 `KVM`.
