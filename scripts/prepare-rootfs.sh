@@ -554,6 +554,22 @@ if [ ! -e "$R/usr/lib/x86_64-linux-gnu/dri" ]; then
     echo "  /usr/lib/x86_64-linux-gnu/dri -> /usr/lib/dri"
 fi
 
+# Report what the guest will actually find, rather than letting it discover a
+# missing server as "exec: /usr/lib/xorg/Xorg: not found".
+log "Check the graphics stack in the image"
+for f in /usr/bin/Xorg /usr/lib/xorg/Xorg /usr/lib/dri/virtio_gpu_dri.so \
+         /usr/lib/libEGL.so.1 /usr/lib/libgbm.so.1 /usr/lib/libGLESv2.so.2; do
+    if [ -e "$R$f" ]; then
+        echo "  ok      $f"
+    else
+        echo "  MISSING $f"
+    fi
+done
+if [ ! -e "$R/usr/lib/xorg/Xorg" ] && [ -e "$R/usr/bin/Xorg" ]; then
+    warn "no /usr/lib/xorg/Xorg: the guest will fail with 'exec: /usr/lib/xorg/Xorg: not found'"
+    warn "check the export: ls cache/ubuntu-xorg-rootfs/usr/lib/xorg/"
+fi
+
 log "Apply the binary patches (vblank, touch driver)"
 sudo python3 "$SCRIPT_DIR/lib/patch-binaries.py" "$R"
 
