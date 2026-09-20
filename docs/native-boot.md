@@ -112,6 +112,17 @@ Xorg modules and server, the Mesa/GL/GBM/DRM libraries with their full
 dependency tree, the libinput drivers and the glvnd vendor file. Set
 `X11_ROOTFS` to use an export from elsewhere.
 
+`/usr/bin/Xorg` on Ubuntu is a wrapper script that execs `/usr/lib/xorg/Xorg`,
+so the whole `/usr/lib/xorg` tree is copied, not just `modules/`. Without the
+real binary the guest only says:
+
+```
+/usr/bin/Xorg: exec: line 10: /usr/lib/xorg/Xorg: not found
+```
+
+followed by `Can't open display :0` everywhere and a segfault in QtCar. The
+install checks the wrapper's target and warns when it is missing.
+
 The whole dependency tree is copied on purpose: glamor `dlopen`s `libgbm.so.1`,
 and if a single transitive dependency is missing the call fails silently and
 acceleration disappears without a message.

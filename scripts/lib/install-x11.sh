@@ -13,12 +13,19 @@ install_x11_stack() {
     local SRCROOT="$2"
     local SRC="$SRCROOT/usr/lib/x86_64-linux-gnu"
 
-    # Mesa DRI drivers and the Xorg modules that go with them.
-    if [ -d "$SRCROOT/usr/lib/xorg/modules" ]; then
+    # The whole /usr/lib/xorg tree, not just modules/: on Ubuntu /usr/bin/Xorg is
+    # a wrapper script that execs /usr/lib/xorg/Xorg, and without the real binary
+    # it fails with "exec: /usr/lib/xorg/Xorg: not found".
+    if [ -d "$SRCROOT/usr/lib/xorg" ]; then
         sudo mkdir -p "$R/usr/lib/xorg"
-        sudo cp -R "$SRCROOT/usr/lib/xorg/modules" "$R/usr/lib/xorg/"
+        sudo cp -R "$SRCROOT/usr/lib/xorg/." "$R/usr/lib/xorg/"
         sudo chmod a+x "$R"/usr/lib/xorg/modules/drivers/*.so 2>/dev/null || true
-        echo "  Xorg modules"
+        if [ -f "$R/usr/lib/xorg/Xorg" ]; then
+            sudo chmod 0755 "$R/usr/lib/xorg/Xorg"
+            echo "  Xorg server and modules"
+        else
+            echo "  Xorg modules (no /usr/lib/xorg/Xorg in the export)"
+        fi
     fi
     if [ -d "$SRC/dri" ]; then
         sudo cp -R "$SRC/dri" "$R/usr/lib/"
@@ -81,4 +88,14 @@ install_x11_stack() {
 }
 JSON
     echo "  glvnd vendor file"
+
+    # /usr/bin/Xorg on Ubuntu is a wrapper: check the target it execs exists,
+    # otherwise the guest only says "exec: /usr/lib/xorg/Xorg: not found".
+    if [ -f "$R/usr/bin/Xorg" ] && head -c 2 "$R/usr/bin/Xorg" | grep -q '#!'; then
+        local target
+        target="$(sudo grep -oE '/usr/lib/xorg/Xorg[^ ]*' "$R/usr/bin/Xorg" | head -1)"
+        if [ -n "$target" ] && [ ! -f "$R$target" ]; then
+            echo "  warning: /usr/bin/Xorg execs $target, which is missing" >&2
+        fi
+    fi
 }
