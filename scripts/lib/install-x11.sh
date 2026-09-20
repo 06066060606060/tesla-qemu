@@ -13,30 +13,43 @@ install_x11_stack() {
     local SRCROOT="$2"
     local SRC="$SRCROOT/usr/lib/x86_64-linux-gnu"
 
+    # shellcheck source=image-path.sh
+    . "$(dirname "${BASH_SOURCE[0]}")/image-path.sh"
+
+    # Resolve the destinations through the image's own symlinks. Writing to
+    # "$R/usr/lib/..." when /usr/lib is an absolute symlink would silently land
+    # on the build machine instead of in the image.
+    local LIBD BIND XORGD SHAD
+    LIBD="$(image_path "$R" /usr/lib)"
+    BIND="$(image_path "$R" /usr/bin)"
+    XORGD="$(image_path "$R" /usr/lib/xorg)"
+    SHAD="$(image_path "$R" /usr/share)"
+    echo "  destination for /usr/lib: ${LIBD#"$R"}"
+
     # The whole /usr/lib/xorg tree, not just modules/: on Ubuntu /usr/bin/Xorg is
     # a wrapper script that execs /usr/lib/xorg/Xorg, and without the real binary
     # it fails with "exec: /usr/lib/xorg/Xorg: not found".
     if [ -d "$SRCROOT/usr/lib/xorg" ]; then
-        sudo mkdir -p "$R/usr/lib/xorg"
-        sudo cp -R "$SRCROOT/usr/lib/xorg/." "$R/usr/lib/xorg/"
-        sudo chmod a+x "$R"/usr/lib/xorg/modules/drivers/*.so 2>/dev/null || true
-        if [ -f "$R/usr/lib/xorg/Xorg" ]; then
-            sudo chmod 0755 "$R/usr/lib/xorg/Xorg"
+        sudo mkdir -p "$XORGD"
+        sudo cp -R "$SRCROOT/usr/lib/xorg/." "$XORGD/"
+        sudo chmod a+x "$XORGD"/modules/drivers/*.so 2>/dev/null || true
+        if [ -f "$XORGD/Xorg" ]; then
+            sudo chmod 0755 "$XORGD/Xorg"
             echo "  Xorg server and modules"
         else
             echo "  Xorg modules (no /usr/lib/xorg/Xorg in the export)"
         fi
     fi
     if [ -d "$SRC/dri" ]; then
-        sudo cp -R "$SRC/dri" "$R/usr/lib/"
-        sudo chmod a+x "$R"/usr/lib/dri/*.so 2>/dev/null || true
+        sudo cp -R "$SRC/dri" "$LIBD/"
+        sudo chmod a+x "$LIBD"/dri/*.so 2>/dev/null || true
         echo "  DRI drivers ($(ls "$SRC/dri" | wc -l) files)"
     fi
 
     # Xorg itself: the firmware's server has no modesetting driver for virtio.
     for b in Xorg X; do
         [ -f "$SRCROOT/usr/bin/$b" ] || continue
-        sudo install -m 0755 "$SRCROOT/usr/bin/$b" "$R/usr/bin/$b"
+        sudo install -m 0755 "$SRCROOT/usr/bin/$b" "$BIND/$b"
         echo "  /usr/bin/$b"
     done
 
@@ -63,7 +76,7 @@ install_x11_stack() {
     for lib in "${libs[@]}"; do
         if [ -f "$SRC/$lib" ]; then
             # -L resolves the symlink so a real file lands in the image.
-            sudo cp -L "$SRC/$lib" "$R/usr/lib/$lib"
+            sudo cp -L "$SRC/$lib" "$LIBD/$lib"
             copied=$((copied + 1))
         else
             missing=$((missing + 1))
@@ -73,13 +86,13 @@ install_x11_stack() {
     echo "  $copied libraries ($missing missing)"
 
     if [ -d "$SRCROOT/usr/share/libwacom" ]; then
-        sudo mkdir -p "$R/usr/share/libwacom"
-        sudo cp -R "$SRCROOT"/usr/share/libwacom/* "$R/usr/share/libwacom/"
+        sudo mkdir -p "$SHAD/libwacom"
+        sudo cp -R "$SRCROOT"/usr/share/libwacom/* "$SHAD/libwacom/"
     fi
 
     # glvnd needs to be told which vendor library to load.
-    sudo mkdir -p "$R/usr/share/glvnd/egl_vendor.d"
-    sudo tee "$R/usr/share/glvnd/egl_vendor.d/50_mesa.json" >/dev/null <<'JSON'
+    sudo mkdir -p "$SHAD/glvnd/egl_vendor.d"
+    sudo tee "$SHAD/glvnd/egl_vendor.d/50_mesa.json" >/dev/null <<'JSON'
 {
     "file_format_version" : "1.0.0",
     "ICD": {
@@ -91,10 +104,10 @@ JSON
 
     # /usr/bin/Xorg on Ubuntu is a wrapper: check the target it execs exists,
     # otherwise the guest only says "exec: /usr/lib/xorg/Xorg: not found".
-    if [ -f "$R/usr/bin/Xorg" ] && head -c 2 "$R/usr/bin/Xorg" | grep -q '#!'; then
+    if [ -f "$BIND/Xorg" ] && head -c 2 "$BIND/Xorg" | grep -q '#!'; then
         local target
-        target="$(sudo grep -oE '/usr/lib/xorg/Xorg[^ ]*' "$R/usr/bin/Xorg" | head -1)"
-        if [ -n "$target" ] && [ ! -f "$R$target" ]; then
+        target="$(sudo grep -oE '/usr/lib/xorg/Xorg[^ ]*' "$BIND/Xorg" | head -1)"
+        if [ -n "$target" ] && [ ! -f "$(image_path "$R" "$target")" ]; then
             echo "  warning: /usr/bin/Xorg execs $target, which is missing" >&2
         fi
     fi

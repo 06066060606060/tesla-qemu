@@ -112,6 +112,25 @@ Xorg modules and server, the Mesa/GL/GBM/DRM libraries with their full
 dependency tree, the libinput drivers and the glvnd vendor file. Set
 `X11_ROOTFS` to use an export from elsewhere.
 
+#### Files that never reach the image
+
+An absolute symlink inside the unpacked rootfs points at the *build machine*.
+If the firmware ships `/usr/lib` as a link to `/lib64`, then writing to
+`$R/usr/lib/xorg/Xorg` creates `/lib64/xorg/Xorg` on the host and nothing in the
+image, while every command reports success. That is why `prepare-rootfs.sh`
+reported `Xorg server and modules` while the guest still said
+`exec: /usr/lib/xorg/Xorg: not found`.
+
+`scripts/lib/image-path.sh` resolves each destination through the image's own
+symlinks before writing, and the build prints where `/usr/lib` actually lands:
+
+```
+  destination for /usr/lib: /lib64
+```
+
+The build also lists the finished squashfs to confirm the files are really in
+there, rather than trusting the staging directory.
+
 `/usr/bin/Xorg` on Ubuntu is a wrapper script that execs `/usr/lib/xorg/Xorg`,
 so the whole `/usr/lib/xorg` tree is copied, not just `modules/`. Without the
 real binary the guest only says:
