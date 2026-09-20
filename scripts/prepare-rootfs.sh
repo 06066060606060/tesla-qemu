@@ -42,6 +42,12 @@
 # https://cn0xroot.wordpress.com/2026/09/20/root_tesla_os_on_qemu_part_2_debugging_fixing/
 set -euo pipefail
 
+# Fail loudly. A command substitution whose pipeline returns non-zero aborts the
+# script under "set -e", and without this trap it looks like a clean finish
+# several steps before the repack.
+trap 'st=$?; [ $st -eq 0 ] || printf "\n*** aborted at line %s (exit %s): %s\n" \
+    "$LINENO" "$st" "$BASH_COMMAND" >&2' EXIT
+
 IMG="${1:-}"
 OUT="${2:-out/rootfs_edited.squashfs}"
 ROOT_DIR="${ROOT_DIR:-out/squashfs-root}"

@@ -87,7 +87,7 @@ install_x11_stack() {
 
     if [ -d "$SRCROOT/usr/share/libwacom" ]; then
         sudo mkdir -p "$SHAD/libwacom"
-        sudo cp -R "$SRCROOT"/usr/share/libwacom/* "$SHAD/libwacom/"
+        sudo cp -R "$SRCROOT"/usr/share/libwacom/. "$SHAD/libwacom/" || true
     fi
 
     # glvnd needs to be told which vendor library to load.
@@ -104,11 +104,15 @@ JSON
 
     # /usr/bin/Xorg on Ubuntu is a wrapper: check the target it execs exists,
     # otherwise the guest only says "exec: /usr/lib/xorg/Xorg: not found".
-    if [ -f "$BIND/Xorg" ] && head -c 2 "$BIND/Xorg" | grep -q '#!'; then
-        local target
-        target="$(sudo grep -oE '/usr/lib/xorg/Xorg[^ ]*' "$BIND/Xorg" | head -1)"
-        if [ -n "$target" ] && [ ! -f "$(image_path "$R" "$target")" ]; then
-            echo "  warning: /usr/bin/Xorg execs $target, which is missing" >&2
-        fi
+    # Every substitution here ends with "|| true": under "set -euo pipefail" a
+    # grep that matches nothing would abort the whole build without a word.
+    local target=""
+    if [ -f "$BIND/Xorg" ]; then
+        target="$(sudo grep -oE '/usr/lib/xorg/Xorg[^ "]*' "$BIND/Xorg" 2>/dev/null | head -1 || true)"
     fi
+    if [ -n "$target" ] && [ ! -f "$(image_path "$R" "$target")" ]; then
+        echo "  warning: /usr/bin/Xorg execs $target, which is missing" >&2
+    fi
+
+    return 0
 }
