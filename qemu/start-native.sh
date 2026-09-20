@@ -33,6 +33,17 @@ GUEST_SSH_PORT="${GUEST_SSH_PORT:-2022}"
 # cause off the console and looks like a boot loop. PANIC=1 restores the
 # hardware behaviour (reboot after 1 s).
 PANIC="${PANIC:-0}"
+
+# APPARMOR=0 boots without AppArmor. The firmware's profiles refuse to execute
+# binaries we add to the image, e.g. Xorg imported from Ubuntu:
+#   /usr/bin/Xorg: exec: /usr/lib/xorg/Xorg: Permission denied
+APPARMOR="${APPARMOR:-1}"
+if [ "$APPARMOR" = "1" ]; then
+    APPARMOR_ARGS="security=apparmor apparmor=1"
+else
+    APPARMOR_ARGS="apparmor=0"
+    echo "AppArmor disabled on the kernel command line (APPARMOR=0)"
+fi
 RESOLUTION="${RESOLUTION:-1200x1920}"
 WIDTH="${RESOLUTION%x*}"
 HEIGHT="${RESOLUTION#*x}"
@@ -105,7 +116,7 @@ fi
 # the dwc3 blacklist avoids a long USB role-switch probe that does not exist
 # in QEMU.
 ARGS+=(
-    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=${PANIC} security=apparmor apparmor=1 intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 net.ifnames=0 biosdevname=0 video=${RESOLUTION}"
+    -append "console=tty0 console=ttyS0,115200n8 loglevel=8 ignore_loglevel panic=${PANIC} $APPARMOR_ARGS intel_xhci_usb_role_switch.default_role=1 modprobe.blacklist=dwc3 rng_core.default_quality=1000 rcupdate.rcu_cpu_stall_timeout=60 net.ifnames=0 biosdevname=0 video=${RESOLUTION}"
 )
 
 if [ "$PANIC" = "0" ]; then

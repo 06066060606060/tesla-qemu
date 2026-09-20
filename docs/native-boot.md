@@ -112,6 +112,24 @@ Xorg modules and server, the Mesa/GL/GBM/DRM libraries with their full
 dependency tree, the libinput drivers and the glvnd vendor file. Set
 `X11_ROOTFS` to use an export from elsewhere.
 
+#### `Permission denied` when Xorg starts
+
+```
+/usr/bin/Xorg: exec: line 10: /usr/lib/xorg/Xorg: Permission denied
+```
+
+The binary is in the image and executable: it is AppArmor refusing to execute a
+file the firmware's profiles do not know. Confirm with `dmesg | grep -i denied`
+in the guest, then boot without confinement:
+
+```
+APPARMOR=0 ./qemu/start-native.sh
+```
+
+AppArmor is only a hardening layer here, so disabling it inside a throwaway VM
+costs nothing. The alternative is to widen the profiles under
+`/etc/apparmor.d` in the image, which is more work for the same result.
+
 #### Files that never reach the image
 
 An absolute symlink inside the unpacked rootfs points at the *build machine*.
