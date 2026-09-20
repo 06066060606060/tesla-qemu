@@ -87,6 +87,49 @@ ssh -p 2222 root@localhost     # NET=user
 sv status /etc/sv/*            # what runit actually started
 ```
 
+### Graphics: "no screens found", segfault in QtCar
+
+The old Alpine path installed a set of guest-side files that the native path
+also needs. `prepare-rootfs.sh` now does it, but the helper binaries have to be
+built first, in a container, because they need X11 headers:
+
+```bash
+./scripts/build-tools.sh                 # out/x11-input-proxy, touch-proxy, vblank-fix.so
+./scripts/prepare-rootfs.sh firmware/<version>.squashfs
+```
+
+What gets installed and why:
+
+| Item | Symptom when missing |
+| --- | --- |
+| `10-modesetting.conf`, `20-input.conf` | `(EE) no screens found`, no input devices |
+| `10-monitor.conf` disabled | the stock monitor section fights the virtio screen |
+| `/usr/local/bin/x11-input-proxy` | `No such file or directory`, `/dev/input/touch` never appears |
+| `/opt/games/var/tesla-chromium-webapp-adapter` | `mkdir: Read-only file system` |
+| `/usr/lib/x86_64-linux-gnu/dri` | Mesa cannot find `virtio_gpu_dri` |
+| `tesla` user shell | `su` fails in `start-qtcar.sh` |
+| `/home/tesla` created at runtime | `Unable to create folder /home/tesla/.Tesla`, then a segfault |
+
+`NATIVE=1 ./scripts/build-tools.sh` builds without a container, but the result is
+linked against the host's libc, which may not match the guest.
+
+`runsv ... fatal: unable to lock supervise/lock` for the stock services is
+expected: their `supervise` directories are on the read-only squashfs. It does
+not prevent QtCar from starting, it only means `sv` cannot talk to them.
+
+`modprobe: can't change directory to '6.6.14-0-lts'` means the guest has no
+module tree for the Alpine kernel — the squashfs only ships `4.14.334-PLK`. Pass
+the same `MODULES_DIR` used for the initrd to `prepare-rootfs.sh` and it copies
+the tree into the image:
+
+```bash
+MODULES_DIR=cache/modloop/modules/6.6.14-0-lts \
+    ./scripts/prepare-rootfs.sh firmware/<version>.squashfs
+```
+
+The modules the UI needs (`virtio_gpu`, `evdev`, `uinput`, `usbhid`) are already
+loaded by the initrd, so this is only for convenience.
+
 ### Launch helpers
 
 `rootfs/root/start.sh` and `start-qtcar.sh` belong to the Alpine path, which

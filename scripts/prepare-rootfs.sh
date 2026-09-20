@@ -492,6 +492,74 @@ else
     warn "rootfs/root not found; no launch helper installed"
 fi
 
+# --- 10: X11 and graphics assets -----------------------------------------
+# The Alpine path (build.sh) installed these into the disk image; the native
+# path has to put them in the squashfs. Without the modesetting configuration
+# Xorg stops with "no screens found", and without a writable /opt/games/var or
+# the DRI path the UI cannot start.
+XORG_D="$R/etc/X11/xorg.conf.d"
+if [ -d "$SCRIPT_DIR/../rootfs/etc/X11/xorg.conf.d" ]; then
+    log "Install the Xorg configuration"
+    sudo mkdir -p "$XORG_D"
+    # The stock monitor section conflicts with the virtio screen.
+    if [ -f "$XORG_D/10-monitor.conf" ]; then
+        sudo mv "$XORG_D/10-monitor.conf" "$XORG_D/10-monitor.conf.orig"
+        echo "  10-monitor.conf disabled"
+    fi
+    for f in "$SCRIPT_DIR/../rootfs/etc/X11/xorg.conf.d/"*.conf; do
+        [ -f "$f" ] || continue
+        sudo install -m 0644 "$f" "$XORG_D/$(basename "$f")"
+        echo "  $(basename "$f")"
+    done
+else
+    warn "rootfs/etc/X11 not found: Xorg will likely stop with 'no screens found'"
+fi
+
+log "Create the directories the UI writes to"
+# The rootfs is read-only at runtime, so anything the UI expects to create must
+# exist now, and anything it must write into has to live on a volume or tmpfs.
+for d in /opt/games/var/tesla-chromium-webapp-adapter /opt/games/run \
+         /usr/lib/x86_64-linux-gnu /usr/local/bin /usr/local/lib; do
+    sudo mkdir -p "$R$d"
+done
+if [ -d "$R/usr/lib/dri" ] && [ ! -e "$R/usr/lib/x86_64-linux-gnu/dri" ]; then
+    sudo ln -sfn /usr/lib/dri "$R/usr/lib/x86_64-linux-gnu/dri"
+    echo "  /usr/lib/x86_64-linux-gnu/dri -> /usr/lib/dri"
+fi
+
+# Binaries built by scripts/build-tools.sh (they need X11 headers, so they are
+# built in a container rather than here).
+for b in x11-input-proxy touch-proxy; do
+    if [ -f "$SCRIPT_DIR/../out/$b" ]; then
+        sudo install -m 0755 "$SCRIPT_DIR/../out/$b" "$R/usr/local/bin/$b"
+        echo "  /usr/local/bin/$b"
+    else
+        warn "out/$b missing: run scripts/build-tools.sh (touch input will not work)"
+    fi
+done
+if [ -f "$SCRIPT_DIR/../out/vblank-fix.so" ]; then
+    sudo install -m 0755 "$SCRIPT_DIR/../out/vblank-fix.so" "$R/usr/local/lib/vblank-fix.so"
+    echo "  /usr/local/lib/vblank-fix.so"
+fi
+
+# The tesla user needs a real shell for start-qtcar.sh's su.
+if sudo grep -qE '^tesla:.*:/bin/false$' "$R/etc/passwd" 2>/dev/null; then
+    log "Give the tesla user a shell"
+    sudo sed -i -E 's@^tesla:(.*):/bin/false$@tesla:\1:/bin/bash@' "$R/etc/passwd"
+fi
+
+# Alpine kernel modules: the squashfs only ships 4.14.334-PLK, so modprobe in
+# the guest fails with "can't change directory to '6.6.14-0-lts'". Copying the
+# tree used to build the initrd makes modprobe work inside the guest too.
+if [ -n "${MODULES_DIR:-}" ] && [ -d "$MODULES_DIR" ]; then
+    KVER_G="$(basename "$MODULES_DIR")"
+    log "Install the $KVER_G modules in the guest"
+    sudo mkdir -p "$R/lib/modules"
+    sudo cp -a "$MODULES_DIR" "$R/lib/modules/$KVER_G"
+    sudo depmod -b "$R" "$KVER_G" 2>/dev/null ||
+        warn "depmod failed; modprobe may still need explicit paths"
+fi
+
 # --- repack --------------------------------------------------------------
 log "Repack -> $OUT"
 sudo rm -f "$OUT"
