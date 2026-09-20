@@ -96,6 +96,11 @@ so `prepare-rootfs.sh` installs them under `/root`, plus a generated
 removed — network, virtual filesystems, the Alpine modloop mount and the sshd
 launch.
 
+`start-qtcar.sh` runs the UI as the `tesla` user from `rootfs/home/tesla/start.sh`.
+That copy cannot go to `/home/tesla`, since `/home` is an LVM volume mounted over
+the squashfs, so it is installed as `/usr/local/bin/qtcar-user.sh` and the
+wrapper in `/root` points there.
+
 Over SSH, as root:
 
 ```bash
