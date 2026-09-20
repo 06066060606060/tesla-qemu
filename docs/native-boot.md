@@ -130,6 +130,31 @@ MODULES_DIR=cache/modloop/modules/6.6.14-0-lts \
 The modules the UI needs (`virtio_gpu`, `evdev`, `uinput`, `usbhid`) are already
 loaded by the initrd, so this is only for convenience.
 
+### `Unable to create folder /home/tesla/.Tesla`, then a segfault
+
+QtCar keeps its settings, cache and database under `/home/tesla/.Tesla`, and dies
+without them. `/home` is an LVM volume: empty on a fresh overlay, and still the
+read-only squashfs whenever the volume is not mounted. `start-native.sh` now
+creates the directory, falls back to a tmpfs when `/home` is not writable, and
+gives it to the `tesla` user:
+
+```
+storage: /home is not writable, mounting a tmpfs on /home/tesla
+storage: /home/tesla ready
+```
+
+A tmpfs means the UI starts from scratch on every boot. To keep its state, make
+sure the `home` volume is mounted (`mount | grep /home`, `lvs ivg`).
+
+### `Server is already active for display 0`
+
+A leftover Xorg from an earlier attempt. `start-native.sh` reuses the running
+server instead of failing; to force a clean start, kill it and remove the lock:
+
+```bash
+pkill Xorg; rm -f /tmp/.X0-lock
+```
+
 ### Launch helpers
 
 `rootfs/root/start.sh` and `start-qtcar.sh` belong to the Alpine path, which
