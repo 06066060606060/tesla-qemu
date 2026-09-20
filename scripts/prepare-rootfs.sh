@@ -426,7 +426,11 @@ if [ -d "$SCRIPT_DIR/../rootfs/root" ]; then
     for f in "$SCRIPT_DIR/../rootfs/root/"*.sh; do
         [ -f "$f" ] || continue
         sudo install -m 0755 "$f" "$R/root/$(basename "$f")"
-        echo "  /root/$(basename "$f")"
+        # /root may be a link into /var, or a mount point, in which case the
+        # copy above is hidden at runtime. /usr/local/bin always survives.
+        sudo mkdir -p "$R/usr/local/bin"
+        sudo install -m 0755 "$f" "$R/usr/local/bin/$(basename "$f")"
+        echo "  /root/$(basename "$f") and /usr/local/bin/$(basename "$f")"
     done
 
     # Native-boot variant: runit already handled the boot, so drop the Alpine
@@ -461,6 +465,7 @@ open(dst, 'w').write(text)
 print("  /root/start-native.sh (QtCar/Xorg/input only)")
 PYHELPER
     sudo chmod 0755 "$R/root/start-native.sh"
+    sudo install -m 0755 "$R/root/start-native.sh" "$R/usr/local/bin/start-native.sh"
 
     # start-qtcar.sh runs the UI as the tesla user from /home/tesla/start.sh,
     # but /home is an LVM volume mounted over the squashfs, so a copy there
@@ -478,6 +483,7 @@ PYHELPER
 exec su -s /bin/bash tesla -c "/usr/local/bin/qtcar-user.sh $*"
 QTCAR
         sudo chmod 0755 "$R/root/start-qtcar.sh"
+        sudo install -m 0755 "$R/root/start-qtcar.sh" "$R/usr/local/bin/start-qtcar.sh"
         echo "  /usr/local/bin/qtcar-user.sh (run by /root/start-qtcar.sh)"
     else
         warn "rootfs/home/tesla/start.sh missing; /root/start-qtcar.sh will not work"

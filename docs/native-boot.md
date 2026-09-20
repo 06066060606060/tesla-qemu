@@ -101,12 +101,32 @@ That copy cannot go to `/home/tesla`, since `/home` is an LVM volume mounted ove
 the squashfs, so it is installed as `/usr/local/bin/qtcar-user.sh` and the
 wrapper in `/root` points there.
 
+Everything is installed twice, in `/root` and in `/usr/local/bin`: on some
+builds `/root` is a link into `/var` or a mount point, so the copy there is
+hidden at runtime. If `/root` looks empty, use `/usr/local/bin`.
+
 Over SSH, as root:
 
 ```bash
 /root/start-native.sh      # input devices, Xorg, 1200x1920, touch proxy
 /root/start-qtcar.sh       # the UI, as the tesla user
 ```
+
+To start the UI entirely by hand, without the helpers:
+
+```bash
+export DISPLAY=:0
+export LD_LIBRARY_PATH=/usr/tesla/UI/lib:/lib
+export MESA_LOADER_DRIVER_OVERRIDE=virtio_gpu_dri
+export EGL_PLATFORM=x11
+export LIBGL_DRIVERS_PATH=/usr/lib/dri
+cd /usr/tesla/UI/bin
+./QtCar --touch evdev:/dev/input/touch
+```
+
+Run it as `tesla` (`su -s /bin/bash tesla`) unless you are debugging: QtCar
+expects that user to own `/opt/games/run/*`. Xorg must already be running, so
+run the input/Xorg preparation first.
 
 Note that `/root` is on the read-only squashfs, so anything these scripts try to
 rewrite in place fails harmlessly — the Xorg input configuration in particular is
