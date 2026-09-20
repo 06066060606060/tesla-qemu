@@ -498,10 +498,7 @@ for d in /opt/games/var/tesla-chromium-webapp-adapter /opt/games/run \
          /usr/lib/x86_64-linux-gnu /usr/local/bin /usr/local/lib /home/tesla; do
     sudo mkdir -p "$R$d"
 done
-if [ -d "$R/usr/lib/dri" ] && [ ! -e "$R/usr/lib/x86_64-linux-gnu/dri" ]; then
-    sudo ln -sfn /usr/lib/dri "$R/usr/lib/x86_64-linux-gnu/dri"
-    echo "  /usr/lib/x86_64-linux-gnu/dri -> /usr/lib/dri"
-fi
+# The symlink is created after section 11, once /usr/lib/dri exists.
 
 # Binaries built by scripts/build-tools.sh (they need X11 headers, so they are
 # built in a container rather than here).
@@ -535,6 +532,30 @@ if [ -n "${MODULES_DIR:-}" ] && [ -d "$MODULES_DIR" ]; then
     sudo depmod -b "$R" "$KVER_G" 2>/dev/null ||
         warn "depmod failed; modprobe may still need explicit paths"
 fi
+
+# --- 11: Mesa, Xorg and the binary patches -------------------------------
+# The firmware's Mesa only knows Intel hardware, so on the virtio GPU EGL fails
+# with "libEGL warning: egl: failed to create dri2 screen" and QtCar cannot get
+# a GL context. build.sh imported Ubuntu's drivers for the Alpine image; do the
+# same here.
+X11_ROOTFS="${X11_ROOTFS:-$SCRIPT_DIR/../cache/ubuntu-xorg-rootfs}"
+if [ -d "$X11_ROOTFS/usr/lib/x86_64-linux-gnu/dri" ]; then
+    log "Install Mesa and Xorg from $X11_ROOTFS"
+    # shellcheck source=lib/install-x11.sh
+    . "$SCRIPT_DIR/lib/install-x11.sh"
+    install_x11_stack "$R" "$X11_ROOTFS"
+else
+    warn "no Ubuntu X11 rootfs in $X11_ROOTFS: EGL will fail with 'failed to create dri2 screen'"
+    warn "run ./scripts/import-x11.sh first"
+fi
+
+if [ ! -e "$R/usr/lib/x86_64-linux-gnu/dri" ]; then
+    sudo ln -sfn /usr/lib/dri "$R/usr/lib/x86_64-linux-gnu/dri"
+    echo "  /usr/lib/x86_64-linux-gnu/dri -> /usr/lib/dri"
+fi
+
+log "Apply the binary patches (vblank, touch driver)"
+sudo python3 "$SCRIPT_DIR/lib/patch-binaries.py" "$R"
 
 # --- repack --------------------------------------------------------------
 log "Repack -> $OUT"

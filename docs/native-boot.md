@@ -87,6 +87,48 @@ ssh -p 2222 root@localhost     # NET=user
 sv status /etc/sv/*            # what runit actually started
 ```
 
+### `libEGL warning: egl: failed to create dri2 screen`
+
+The firmware's Mesa only knows the Intel GPU of a real car, so on the virtio GPU
+EGL never initialises and QtCar dies without a GL context:
+
+```
+libEGL warning: egl: failed to create dri2 screen
+QEgl::display(): Cannot initialize EGL display: "Not initialized (0x3001)"
+QEglContext::chooseConfig(): Could not find a suitable EGL configuration
+```
+
+`build.sh` solved this for the Alpine image by copying Ubuntu's Mesa, DRI
+drivers and Xorg into it. The native path needs the same import, in two steps:
+
+```bash
+./scripts/import-x11.sh                 # exports cache/ubuntu-xorg-rootfs
+./scripts/prepare-rootfs.sh firmware/<version>.squashfs
+```
+
+`import-x11.sh` needs Docker or Podman (`RUNTIME=podman`) and runs only once;
+`FORCE=1` re-exports. `prepare-rootfs.sh` then installs the DRI drivers, the
+Xorg modules and server, the Mesa/GL/GBM/DRM libraries with their full
+dependency tree, the libinput drivers and the glvnd vendor file. Set
+`X11_ROOTFS` to use an export from elsewhere.
+
+The whole dependency tree is copied on purpose: glamor `dlopen`s `libgbm.so.1`,
+and if a single transitive dependency is missing the call fails silently and
+acceleration disappears without a message.
+
+Two binary patches are applied at the same time, as `build.sh` did:
+
+- `libdrm.so.2`: the virtio GPU has no `DRM_IOCTL_WAIT_VBLANK`, and QtCar waits
+  for a vblank before presenting a frame, so the screen stays black.
+  `drmWaitVBlank` is made to return 0.
+- `libQtCarUIFramework.so`: the touch driver is loaded and the display reported
+  as on and powered.
+
+Their offsets belong to one specific firmware build, so each patch checks the
+bytes it expects and prints a warning instead of failing when they differ. On a
+version other than the one they were derived from, expect
+`unexpected bytes at 0x...: skipped` and no touch input.
+
 ### Graphics: "no screens found", segfault in QtCar
 
 The old Alpine path installed a set of guest-side files that the native path
